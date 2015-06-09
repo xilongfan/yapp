@@ -1,0 +1,257 @@
+YAPP
+
+Last Modified: Wed Sep  4 13:25:35 PDT 2013
+
+Xilong Fan, xfan@spokeo.com, Spokeo Inc.
+
+================================================================================
+Introduction
+================================================================================
+
+YAPP(Yet-Another-Parallel-Processing) aims to provide a simple, fault-tolerant,
+automated batching system to manage all backend processes across multiple script
+server. It supports auto splitting a job into to smaller tasks in a cross-node
+manner to fully utilize the hardware, migrating subtasks among different nodes
+for automatic failover with dynamic load balancing. In all, it is designed for
+supporting easy, reliable, not so massive parallel processing without the hassle
+of provisioning a distributed file system.
+
+For more details on Yapp design and implementation, feel free to take a look at
+those materials included in the doc folder.
+
+================================================================================
+Hierarchy
+================================================================================
+
+.
+|-- AUTHORS
+|-- Makefile.am
+|-- README
+|-- bootstrap.sh
+|-- config              /** default conf. file to be installed. **/
+|   `-- yapp.cfg
+|-- configure.ac
+|-- contrib             /** spec for building rpm and init.d script. **/
+|   |-- yapp.spec
+|   `-- yappd
+|-- doc
+|   |-- yapp_interanl.info
+|   |-- yapp_a_data_processing_framework.pdf
+|   `-- proc_ctrl.inf
+|-- lib
+|   `-- rpms
+|       |-- RPMS
+|       |   |-- centos5 /** rpm dependencies for building under CentOS 5 **/
+|       |   |   |-- atrpms-repo-5-6.el5.x86_64.rpm
+|       |   |   |-- ius-release-1.0-11.ius.el5.noarch.rpm
+|       |   |   |-- thrift-0.9.1-0.x86_64.rpm
+|       |   |   |-- thrift-lib-cpp-0.9.1-0.x86_64.rpm
+|       |   |   |-- thrift-lib-cpp-devel-0.9.1-0.x86_64.rpm
+|       |   |   |-- zookeeper-3.4.5-1.x86_64.rpm
+|       |   |   `-- zookeeper-lib-3.4.5-1.x86_64.rpm
+|       |   `-- centos6 /** rpm dependencies for building under CentOS 6 **/
+|       |       |-- thrift-0.9.0-0.x86_64.rpm
+|       |       |-- thrift-lib-cpp-0.9.0-0.x86_64.rpm
+|       |       |-- thrift-lib-cpp-devel-0.9.0-0.x86_64.rpm
+|       |       |-- zookeeper-3.4.5-1.x86_64.rpm
+|       |       `-- zookeeper-lib-3.4.5-1.x86_64.rpm
+|       `-- SRPMS
+|           |-- centos5
+|           |   |-- thrift-0.9.1-0.src.rpm
+|           |   `-- zookeeper-3.4.5-1.src.rpm
+|           `-- centos6
+|               |-- thrift-0.9.0-0.src.rpm
+|               `-- zookeeper-3.4.5-1.src.rpm
+|-- src
+|   `-- yapp
+|       |-- admin
+|       |-- base
+|       |-- client
+|       |-- domain
+|       |-- master
+|       |-- util
+|       `-- worker
+|-- test
+|   `-- yapp
+|       |-- admin
+|       |-- client
+|       |-- conf
+|       |-- domain
+|       |-- master
+|       `-- util
+`-- thrift
+    `-- yapp_service.thrift
+
+================================================================================
+System Requirements
+================================================================================
+A Working 64-bit Box Running CentOS 5/6
+
+================================================================================
+Installation
+================================================================================
+
+1 Install the dependencies and build YAPP RPM package:
+
+- First make sure you have libraries needed by thrift, simply run
+
+  yum install wget rpmdevtools rpm-build openssl-devel automake libtool flex \
+              bison pkgconfig gcc-c++ boost-devel libevent-devel zlib-devel
+
+  wget http://download.fedoraproject.org/pub/epel/5/x86_64/epel-release-5-4.noarch.rpm
+  rpm -ivh epel-release-5-4.noarch.rpm
+
+  yum install cppunit cppunit-devel
+
+- If you are running CentOS 6, install rpms under folder:
+
+lib
+`-- rpms
+     `-- RPMS
+          `-- centos6
+               |-- zookeeper-lib-3.4.5-1.x86_64.rpm
+               |-- thrift-0.9.0-0.x86_64.rpm
+               |-- thrift-lib-cpp-0.9.0-0.x86_64.rpm
+               `-- thrift-lib-cpp-devel-0.9.0-0.x86_64.rpm
+and replace the config files as follows:
+  mv ./bootstrap.sh.centos6 ./bootstrap.sh
+  mv ./configure.ac.centos6 ./configure.ac
+
+- If you are running CentOS 5, install rpms under folder:
+
+lib
+`-- rpms
+    `-- RPMS
+        `-- centos5
+            |-- atrpms-repo-5-6.el5.x86_64.rpm /** repo. for libtool 2.2 **/
+            |-- ius-release-1.0-11.ius.el5.noarch.rpm /** autoconf2.6x's repo**/
+            |-- zookeeper-lib-3.4.5-1.x86_64.rpm
+            |-- thrift-0.9.1-0.x86_64.rpm
+            |-- thrift-lib-cpp-0.9.1-0.x86_64.rpm
+            `-- thrift-lib-cpp-devel-0.9.1-0.x86_64.rpm
+
+then run
+  yum install boost141 boost141-devel
+  yum install autoconf26x
+  yum --enablerepo=atrpms-testing install libtool
+
+Then update the zookeeper cluster info on file after you finish setting up the
+zookeeper cluster(see the end of this doc for quick ref.):
+
+  config/yapp.cfg
+
+2 Install YAPP as A System Service:
+
+  ./bootstrap.sh
+  make install
+
+3 Install YAPP via RPM packages:
+
+  ./bootstrap.sh
+  make dist
+  rpmbuild -ta yapp-${version}.tar.gz
+  rpm -ivh yapp-${version}.rpm
+
+4 After Installation, You Should See 3 Binary Instance, includes: {
+    yappd, runs as a system service.
+    yapp, the client used for submitting jobs.
+    ypadmin, provides basic utilities for yapp administration.
+  }
+
+  Also do not forget to Enable the communication by changing iptables policy.
+
+5 To Run service, first make sure you got the zookeeper cluster setup correctly,
+  then update the configuration file, then run
+
+    ypadmin --init /** only do this for first time running!!! **/
+    service yappd start
+
+================================================================================
+Testing
+================================================================================
+
+Before you run the testing, you may want to setup the zookeeper cluster first
+and update the ip addresses for these nodes in the conf. file for testing:
+
+test
+`-- yapp
+    `-- conf
+        `-- test_cfg_util_load_cfg.input
+
+then install ruby!!! (we use ruby script as sample job):
+  yum install ruby
+
+then run
+  make check
+  make distcheck
+
+This will make all of the libraries(either of the command), and run through all
+unit testing cases defined in each library.
+
+================================================================================
+Quick Guidance for Setting Up Zookeeper Cluster
+================================================================================
+
+Install all Java and RPM dependencies, run
+
+  yum install ant ant-nodeps rpmdevtools pkgconfig
+
+For CentOS 5, install packages under:
+
+lib
+`-- rpms
+    `-- RPMS
+        `-- centos5
+            |-- zookeeper-lib-3.4.5-1.x86_64.rpm
+            `-- zookeeper-3.4.5-1.x86_64.rpm
+
+Then Modify The JAVA_HOME to be '/usr' on Configuration file 
+- /etc/zookeeper/zookeeper-env.sh
+
+Enable the communication by changing iptables policy.
+
+For CentOS 6, install packages under:
+
+lib
+`-- rpms
+    `-- RPMS
+        `-- centos6
+            |-- zookeeper-lib-3.4.5-1.x86_64.rpm
+            `-- zookeeper-3.4.5-1.x86_64.rpm
+
+Suppose You Got Zookeeper Installed on 3 Boxes, includes:
+
+- { 192.168.1.1, 192.168.1.2, 192.168.1.3}
+
+And after installation, all zookeeper config files locates at:
+
+- /etc/zookeeper/zoo.cfg
+
+In this file, you may want to set the data log path on a dedicated device.
+
+- dataDir=/var/lib/zookeeper/data /** some 10k rpm disk **/
+
+Then list all your nodes forms up the zookeeper cluster:
+- server.1=192.168.1.1:2888:3888
+- server.2=192.168.1.2:2888:3888
+- server.3=192.168.1.3:2888:3888
+
+And set the max client connection to a reasonable number.
+maxClientCnxns=1024
+
+Finally, on data log folder(which is /var/lib/zookeeper/data by def.), create a
+file named myid, contains a unique seq number for this node. In this case, we
+put either 1, 2 or 3 in this file(corresponds to server.1=... above). Also, to
+avoid the unnecessary aggressive swapping policy done by the linux kernel(which
+would definitely doom the zookeeper even it still gets tons of memory unused),
+zero out the value for that by doing:
+
+- echo 0 > /proc/sys/vm/swappiness
+
+And run 'service zookeeper start'
+
+LAST BUT NOT LEAST, DO NOT FORGET TO PUT THESE ZOOKEEPER NODES ADDRESS BACK TO
+YOUR YAPP CONFIGURATION FILE!
+
+Reference:
+[1] http://zookeeper.apache.org/doc/r3.4.5/zookeeperAdmin.html

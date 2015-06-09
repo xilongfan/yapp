@@ -1,0 +1,147 @@
+Tue Apr 09 17:03:30 PDT 2013
+
+- Check-In the necessary tarballs for building rpm packages under CentOS6.3 with
+  corresponding patch file and basic autoconf script files for project building.
+
+Wed Dec 04 17:34:47 PST 2013
+
+Tagged Version: 0.9.0
+
+This will be the first stable version of yapp service after switching to the new
+preforking architecture with graceful termination by async. signal handling. 
+
+Main Features Supported Includes:
+
+- Push-Based model where dedicated single master farms out job across diff. node
+
+- No Single Point of Failure, with a (2N + 1) Zookeeper Cluster stands up to N
+  failure, along with system's ability of doing automatic fail-over to any live
+  nodes powered by all-created-equal design.
+
+- Pull and parse the checkpoints specified by user app.(cur. anchor) in log file
+
+- For every job submitted, yapp provides a semantic of At-Least-Once execution,
+  backed up by zookeeper(applies to every subtask for any given job). Also will
+  perform best effort cleanup during the time-window of fail-over to minimize
+  the chance of redundant execution.
+
+- Always maximizing the parallelization by having the maximum possible number of
+  necessary subtasks running, even in the presence of un-balanced load.
+
+Packaging Information:
+
+- RPM building script with init.d shell { start|stop|reload } provided, tested
+  under both CentOS 5.x/6.3
+
+Mon Dec 09 11:34:23 PST 2013
+
+Road Map for 0.9.1:
+
+- Better user experiences and easier administration, new features may includes:
+
+  1. Support simple job list printing, filtered by owner and host information.
+
+  2. Support On-Demand File Splitting when handling the File IO, such that users
+     do not need to manually splits the file any more, which is handled in a way
+     transparent to our developer, and splitting will only happend when needed.
+
+  3. Support User-Defined dedicated node for each job, as users may want to have
+     nodes solely serving their job requests either due to performance reason or
+     having special environment settings.
+
+  4. Support the Query of Current Environment Settings for a specific daemon.
+
+  5. Support easy setup when user only needs to process id ranges by fixed step
+     while still want to have the full benefits of dynamic job scheduling.
+
+- Bug Fixes Patched:
+  1. Fixing potential dead lock happened in master daemon
+
+Thu Mar 20 17:39:00 PDT 2014
+
+Tagged Version: 0.9.2
+
+New Features Added Includes:
+
+- Support simple job list printing, filtered by owner and host information.
+
+- Support User-Defined dedicated node for each job by providing user the ability
+  to run a specific job within a unique namespace. The only thing user needs to
+  do is to modify yapp config file and restart services on those nodes to use.
+
+- Support the Query of Current Environment Settings for a specific daemon.
+
+- Support easy setup when user only needs to process id ranges by fixed step
+  while still retain the full benefits of dynamic job scheduling.
+
+- Support User-Defined environments list for any ad-hoc library.
+
+- Bug Fixes Patched:
+  1. Fixing typos in ChangeLog.
+  2. Updating the doc to keep it consistent with current architecture.
+
+Wed Apr 02 20:53:20 UTC 2014
+
+Tagged Version: 0.9.3
+
+- Bug Fixes Patched:
+  1. Fixing serious bug in initializing a separate namespace.
+  2. Fixing the un-expected memory bloat caused by incorrect param parsing.
+
+Wed Jun 04 17:55:57 PDT 2014
+
+Tagged Version: 0.9.4
+
+- Bug Fixes Patched:
+  1. Fixing bugs in job initialization when the input is dynamic range.
+
+Wed Jan 14 23:38:31 UTC 2015
+
+Tagged Version: 0.9.5
+
+This will be the first stable version of yapp service specifically tailored and
+tested under real cloud environment and adjusted for job with large batch size.
+
+- Bug Fixes Patched:
+  1. Fixed the bug of not being able to lock the pid file due to the termination
+     of parent process, which will allow the daemon to be started twice on same
+     node and causing big confusion for yapp cluster.
+
+  2. Force master to update woker list in the presence of thrift exception so as
+     to avoid the problem of deadlock caused by long time timeout, also add a
+     thread to periodically check if all scheduling related threads are working
+     well(especially for master instance). All these are for fixing the problem
+     of 'ZOMBIE' master due to the massive nodes failure when we cut down server
+     using auto-scaling group in EC2.
+
+  3. Adding a utility thread to periodically check if all scheduling related
+     threads are working well(especially for master instance), this is to fix
+     the problem of 'ZOMBIE' master due to the unexpected termination of the
+     scheduling threads in the presence of massive nodes failure(which could
+     also be quite common if using auto-scaling group in EC2). For example, the
+     main process is still holding the lease while its scheduling threads all
+     terminated, such that no new jobs could be scheduled and in the mean time
+     mastership cannot be transferred to other nodes.
+
+  4. re-pick a 'right' batch size for node creation, while the transaction limit
+     on zookeeper side needs to be further looked at(jute.maxbuffer?). For now,
+     the maximum single job tested was 10k current processes.
+
+  5. Split the batch operation when calling restart fail/full so as to avoid the
+     error in the presence of large job restart.
+
+Fri Mar 13 02:53:52 UTC 2015
+
+Tagged Version: 0.9.6
+
+This version includes new handy feature together with some critical bug fixes.
+
+- Features Added:
+  1. Adding the option of '--restart-continue' so that user could actually let
+     the terminated/failed to resume from the previous anchor position(if any),
+     this will be a handy feature for processes need to be launched periodically
+     based on the state from its previous execution(Kafka Consumer...)
+
+- Bug Fixes Patched:
+  1. Fixed critical bug when restarting dynamic range job starting from non-zero
+     values, such process range [ 3, 9 ] with step size of 2.

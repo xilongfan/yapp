@@ -1,0 +1,6 @@
+#!/bin/bash
+
+./cleanup.sh
+autoreconf -ivf
+./configure
+make dist

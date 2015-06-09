@@ -1,0 +1,2 @@
+noinst_LTLIBRARIES=libyapp_base.la
+libyapp_base_la_SOURCES=yapp_base.cpp yapp_base.h

@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+### BEGIN INIT INFO
+# Provides:          yappd
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Description:       /etc/init.d/yappd -- startup script for YAPP
+### END INIT INFO
+
+. /etc/rc.d/init.d/functions
+
+RETVAL=0
+prog="yappd"
+
+PID_FILE="/var/run/yappd/yappd.pid" ; mkdir -p `dirname $PID_FILE`
+YAPPD="exec yappd"
+
+start()
+{
+  echo -n $"Starting $prog: "
+  su - yapp -c "$YAPPD --pid-file=$PID_FILE" && success || failure
+  RETVAL=$?
+  echo
+}
+
+get_yappd_pid() {
+  if [ -e "$PID_FILE" ]; then
+    if pidof "$prog" | tr ' ' '\n' | grep -w $(cat $PID_FILE); then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+stop()
+{
+  echo -n $"Stopping $prog: "
+  kill -SIGTERM `cat $PID_FILE` && sleep 4 && success || failure
+  rm -rf $PID_FILE
+  RETVAL=$?
+  echo
+}
+
+reload()
+{
+  echo -n $"Reloading Config for $prog: "
+  kill -SIGHUP `cat $PID_FILE` && sleep 3 && success || failure
+  RETVAL=$?
+  echo
+}
+
+
+case "$1" in
+  start)
+    start
+  ;;
+  stop)
+    stop
+  ;;
+  reload)
+    reload
+  ;;
+  restart)
+    stop
+    start
+  ;;
+  status)
+    PID=$(get_yappd_pid) || true
+    if [ -n "$PID" ]; then
+      echo "$prog is running (pid $PID)."
+      RETVAL=0
+    else
+      if [ -e "$PID_FILE" ]; then
+        echo "$prog is NOT running, while PID file $PID_FILE exists."
+        RETVAL=1
+      else
+        echo "$prog is NOT running, no PID file exists."
+        RETVAL=3
+      fi
+    fi
+  ;;
+  *)
+  echo "Usage: $prog {start|stop|restart|status}"
+  exit 1
+  ;;
+esac
+
+exit $RETVAL

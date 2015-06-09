@@ -1,0 +1,94 @@
+#                                               -*- Autoconf -*-
+# Process this file with autoconf to produce a configure script.
+AC_PREREQ([2.61])
+AC_INIT([yapp], [0.9.6], [xfan@spokeo.com])
+AM_INIT_AUTOMAKE
+
+#AC_DEFINE([DEBUG_YAPP], [], [this macro will be used for trunning on the DEBUG for testing yapp main])
+#AC_DEFINE([DEBUG_YAPP_DAEMON_APP], [], [this macro will be used for trunning on the DEBUG for testing yappd main])
+#AC_DEFINE([DEBUG_YAPP_MASTER_SERVICE_HANDLER], [], [this macro will be used for trunning on the DEBUG for testing YappMasterServiceHandler])
+#AC_DEFINE([DEBUG_YAPP_WORKER_SERVICE_HANDLER], [], [this macro will be used for trunning on the DEBUG for testing YappWorkerServiceHandler])
+#AC_DEFINE([DEBUG_YAPP_CLIENT], [], [this macro will be used for trunning on the DEBUG for testing YappClient])
+#AC_DEFINE([DEBUG_YAPP_ADMIN], [], [this macro will be used for trunning on the DEBUG for testing YappAdmin])
+#AC_DEFINE([DEBUG_YAPP_SERVICE_HANDLER], [], [this macro will be used for trunning on the DEBUG for testing YappServiceHandler])
+#AC_DEFINE([DEBUG_YAPP_DOMAIN_FACTORY], [], [this macro will be used for trunning on the DEBUG for testing YappDomainFactory])
+#AC_DEFINE([DEBUG_YAPP_SERVICE_UTIL], [], [this macro will be used for trunning on the DEBUG for testing YappServiceUtil])
+#AC_DEFINE([DEBUG_YAPP_UTIL], [], [this macro will be used for trunning on the DEBUG for testing YappUtil])
+#AC_DEFINE([DEBUG_YAPP_WORKER], [], [this macro will be used for trunning on the DEBUG for testing YappWorker])
+#AC_DEFINE([DEBUG_YAPP_MASTER], [], [this macro will be used for trunning on the DEBUG for testing YappMaster])
+
+LT_PREREQ([2.2])
+LT_INIT
+
+AC_CONFIG_SRCDIR([src/yapp/yapp.cpp])
+AC_CONFIG_HEADERS([config.h])
+
+# Checks for programs.
+AC_HEADER_STDBOOL
+AC_PROG_CXX
+AC_PROG_RANLIB
+AC_TYPE_SIZE_T
+
+# compilation tests using CC and CPP and use extension `.c' for test programs.
+AC_LANG_CPLUSPLUS
+
+# turnning on all the warnings when doing the compiling.
+AM_CXXFLAGS=[" -DSYSCONFDIR=\\\"${sysconfdir}\\\" $AM_CXXFLAGS -g -Wall"]
+
+AC_SUBST([AM_CXXFLAGS])
+
+# Checks for header files (1).
+AC_HEADER_STDC
+AC_CHECK_HEADERS([zookeeper/zookeeper.h], [], [AC_MSG_ERROR([ZooKeeper C Binding Headers Required!])])
+AC_CHECK_HEADERS([cppunit/TestRunner.h], [], [AC_MSG_ERROR([CppUnit Headers Required!])])
+AC_CHECK_HEADERS([pthread.h], [], [AC_MSG_ERROR([Pthread Headers Required!])])
+AC_CHECK_HEADERS([boost/shared_ptr.hpp], [], [AC_MSG_ERROR([Boost Headers Required!])])
+AC_CHECK_HEADERS([thrift/Thrift.h], [], [AC_MSG_ERROR([Thrift Headers Required!])])
+AC_CHECK_FUNCS([clock_gettime])
+AC_CHECK_FUNCS([dup2])
+AC_CHECK_FUNCS([memset])
+AC_CHECK_FUNCS([socket])
+AC_CHECK_FUNCS([strerror])
+AC_CHECK_FUNCS([strrchr])
+AC_CHECK_HEADERS([arpa/inet.h])
+AC_CHECK_HEADERS([fcntl.h])
+AC_CHECK_HEADERS([netinet/in.h])
+AC_CHECK_HEADERS([sys/ioctl.h])
+AC_CHECK_HEADERS([sys/socket.h])
+AC_FUNC_FORK
+AC_TYPE_INT16_T
+AC_TYPE_INT32_T
+AC_TYPE_INT64_T
+AC_TYPE_MODE_T
+AC_TYPE_PID_T
+AC_TYPE_UINT32_T
+AC_TYPE_UINT8_T
+
+# Checks for libraries.
+AC_CHECK_LIB([zookeeper_mt], [main], [], [AC_MSG_ERROR([ZooKeeper C Binding Library Required!])])
+AC_CHECK_LIB([cppunit], [main], [], [AC_MSG_ERROR([CppUnit Library Required!])])
+AC_CHECK_LIB([pthread], [main], [], [AC_MSG_ERROR([Pthread Library Required!])])
+AC_CHECK_LIB([thrift], [main], [], [AC_MSG_ERROR([Thrift Library Required!])])
+
+AC_CONFIG_FILES([Makefile
+                 src/yapp/Makefile
+		             src/yapp/util/Makefile
+		             src/yapp/base/Makefile
+                 src/yapp/master/Makefile
+		             src/yapp/client/Makefile
+		             src/yapp/worker/Makefile
+		             src/yapp/domain/Makefile
+		             src/yapp/admin/Makefile
+                 test/yapp/Makefile
+                 test/yapp/conf/Makefile
+                 test/yapp/util/Makefile
+                 test/yapp/master/Makefile
+                 test/yapp/client/Makefile
+                 test/yapp/client/id_input/Makefile
+                 test/yapp/client/file_input/Makefile
+                 test/yapp/admin/Makefile
+                 test/yapp/domain/Makefile])
+
+SRC_YAPP_UTIL=yapp/util
+
+AC_OUTPUT
