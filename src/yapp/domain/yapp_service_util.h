@@ -138,9 +138,12 @@ public:
         new_line = StringUtil::convert_int_to_str(new_line_idx);
       }
     }
+    StringUtil::trim_string(new_anchor);
     vector<string> path_arr, data_arr;
-    if ((cur_line.empty() && !new_anchor.empty()) ||
-        (!cur_line.empty() && new_line == cur_line && !new_anchor.empty())) {
+    if ((cur_line.empty() && !new_anchor.empty() &&
+         (new_anchor != DEF_LINE_AND_OFFSET_DELIM)) ||
+        (!cur_line.empty() && new_line == cur_line && !new_anchor.empty() &&
+         (new_anchor != DEF_LINE_AND_OFFSET_DELIM))) {
       if (cur_job_epoch_val < TaskHandleUtil::get_last_modified_epoch_in_sec(log_file_path)) {
         path_arr.push_back(proc_path + "/cur_anchor");
         data_arr.push_back(new_anchor);
