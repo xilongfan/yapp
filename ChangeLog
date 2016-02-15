@@ -145,3 +145,14 @@ This version includes new handy feature together with some critical bug fixes.
 - Bug Fixes Patched:
   1. Fixed critical bug when restarting dynamic range job starting from non-zero
      values, such process range [ 3, 9 ] with step size of 2.
+
+Mon Feb 15 21:39:06 UTC 2016
+
+Tagged Version: 0.9.7
+
+This version is essentially for bug fixing:
+
+- Bug Fixes Patched:
+  1. Flush the job lock whenever there is a failure of connection happened
+     when scheduling tasks, this is for solving the problem of idle tasks
+     (even master is still alive) found when running on AWS spot instances.
