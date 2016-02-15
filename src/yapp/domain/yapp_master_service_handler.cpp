@@ -287,6 +287,8 @@ bool YappMasterServiceHandler::schedule_job(const vector<Task> & subtask_arr,
         b_init_ok = worker_client.execute_sub_task_async_rpc(subtask_arr[i]);
         transport->close();
       } catch (TException &tx) {
+        newly_created_task_set.release_ex_lock(lock_hndl, zkc_proxy_ptr);
+        std::cerr << ">>>> RELEASE WRITE LOCK: " << lock_hndl << std::endl;
         std::cerr << tx.what() << std::endl;
         b_transport_err = true;
       }
