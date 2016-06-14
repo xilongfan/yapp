@@ -64,7 +64,9 @@ public:
     rftask_autosp_polling_rate_sec = cfg_obj.rftask_autosp_polling_rate_sec;
     utility_thread_checking_rate_sec = cfg_obj.utility_thread_checking_rate_sec;
     node_leave_check_polling_rate_sec = cfg_obj.master_check_polling_rate_sec;
-    check_point_polling_rate_sec = cfg_obj.check_point_polling_rate_sec;
+    check_point_polling_rate_sec = cfg_obj.check_point_polling_rate_sec; 
+
+    batch_task_schedule_limit = cfg_obj.batch_task_schedule_limit;
 
     fencing_script_path = cfg_obj.fencing_script_path;
 
@@ -93,6 +95,73 @@ public:
   bool start_yapp_event_handler();
 
 private:
+
+  static bool check_schedule_batch_limit(
+    vector<string> & new_rf_subtsk_arr, int batch_limit
+  );
+
+  static YAPP_MSG_CODE set_create_and_delete_in_small_batch(
+    const vector<string> & upd_path_arr, const vector<string> & upd_data_arr,
+    const vector<string> & path_to_cr_arr, const vector<string> & data_to_cr_arr,
+    const vector<string> & path_to_del, YappServiceHandler * ym_srv_ptr
+  );
+
+  static void commit_range_file_task_schedule_plan(
+    YappServiceHandler * ym_srv_ptr,
+    YappSubtaskQueue & rf_subtask_queue, YappSubtaskQueue & rf_running_subtask_queue,
+    list<string> & subtsk_list_before_change, list<string> & subtsk_list_after_change,
+    list<string> & fin_rf_subtsk_full_hnd_arr, vector<string> & new_rf_subtsk_arr
+  );
+
+  static bool check_and_schedule_to_help_running_processes( 
+    vector<string> & new_rf_subtsk_arr, vector<int> & new_rf_subtsk_idx_arr,
+    list<string> & subtsk_list_before_change, list<string> & subtsk_list_after_change,
+    list<string> & fin_rf_subtsk_arr, list<string> & fin_rf_subtsk_full_hnd_arr,
+    vector<string> & rf_subtask_arr, vector<int> & rf_running_subtsk_idx_arr,
+    YappSubtaskQueue & rf_subtask_queue, int batch_limit
+  );
+
+  static bool check_and_schedule_to_help_terminated_processes( 
+    vector<string> & new_rf_subtsk_arr, vector<int> & new_rf_subtsk_idx_arr,
+    list<string> & subtsk_list_before_change, list<string> & subtsk_list_after_change,
+    list<string> & fin_rf_subtsk_arr, list<string> & fin_rf_subtsk_full_hnd_arr,
+    vector<string> & rf_subtask_arr, YappSubtaskQueue & rf_subtask_queue, int batch_limit
+  );
+
+  static bool check_and_schedule_jobs_directly_owned_by_each_process(
+    vector<string> & rf_subtask_arr, vector<string> & terminated_subtsk_arr,
+    vector<string> & new_rf_subtsk_arr, vector<int> & new_rf_subtsk_idx_arr,
+    vector<int> & terminated_subtsk_idx_arr,
+    list<string> & fin_rf_subtsk_arr, list<string> & fin_rf_subtsk_full_hnd_arr,
+    list<string> & subtsk_list_before_change, list<string> & subtsk_list_after_change,
+    YappSubtaskQueue & rf_subtask_queue, int batch_limit
+  );
+
+  static void check_and_clear_free_processes(
+    vector<string> & new_rf_subtsk_arr,  vector<string> & rf_failed_subtsk_arr,
+    vector<string> & rf_running_subtsk_arr, vector<string> & rf_subtask_arr,
+    list<string> & fin_rf_subtsk_full_hnd_arr, YappSubtaskQueue & rf_subtask_queue,
+    YappServiceHandler * ym_srv_ptr
+  );
+
+  static void find_all_current_index_for_running_and_terminated_processes(
+    vector<string> & rf_subtask_arr,        vector<string> & rf_running_subtsk_arr,
+    vector<string> & terminated_subtsk_arr, vector<int> & rf_running_subtsk_idx_arr,
+                                            vector<int> & terminated_subtsk_idx_arr
+  );
+
+  static bool fetch_queue_and_filter_failed_rftasks(
+    YappServiceHandler * ym_srv_ptr,
+    vector<string> & rf_running_subtsk_arr, vector<string> & rf_subtask_arr,
+    vector<string> & rf_failed_subtsk_arr, YappSubtaskQueue & rf_running_subtask_queue,
+    YappSubtaskQueue & rf_subtask_queue, YappSubtaskQueue & rf_failed_task_queue
+  );
+
+  static void setup_rftasks_queue_path(YappServiceHandler * ym_srv_ptr,
+                                       YappSubtaskQueue & rf_running_subtask_queue,
+                                       YappSubtaskQueue & rf_subtask_queue,
+                                       YappSubtaskQueue & rf_failed_task_queue,
+                                       const string & rf_task_to_schedule);
   /**
    * Thread to periodically check if any subtask tasking range file as its input
    * needs more proc.s to run(due to the restart due to failure while all other
@@ -107,6 +176,7 @@ private:
    */
   static void * thread_schedule_rfile_tasks(void * ym_srv_ptr);
   static bool schedule_rfile_tasks(YappServiceHandler * ym_srv_ptr);
+  static bool schedule_rfile_tasks_in_batch(YappServiceHandler * ym_srv_ptr);
 
   /** thread to schedule queued subtasks when instance runs as a master. **/
   static void * thread_reschedule_tasks(void * ym_srv_ptr);
@@ -184,6 +254,8 @@ private:
   int utility_thread_checking_rate_sec;
   int node_leave_check_polling_rate_sec;
   int check_point_polling_rate_sec;
+
+  int batch_task_schedule_limit;
 
   /**
    * - variables holding the way to access the shared memory to communicate with
@@ -437,6 +509,7 @@ public:
   void print_proc_tree_rpc(string & tree_str, const string & proc_handle);
 
   void print_queue_stat(string & tree_str, const string & hndl_str);
+  void print_failed_queue_stat(string & tree_str, const string & hndl_str);
 
   void pause_proc_arr_rpc(vector<bool> & ret_arr,
                     const vector<string> & proc_hndl_arr);

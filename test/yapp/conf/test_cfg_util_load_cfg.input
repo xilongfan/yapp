@@ -126,6 +126,17 @@ pid_file=/var/run/yappd/yappd.pid
 # root_path=/crim-data-load
 
 #
+# Specifies the maximum # of tasks to be scheduled for every job.
+#
+# Note:
+# - Be very careful about changing this, which will potentially cause some big
+#   scheduling trouble as each round of job scheduling needs to be exec. as 1
+#   Atomic transaction, while zookeeper tends to have a limit for the metadata
+#   gets committed and large commits may fail if it exceeds the limit.
+#
+batch_task_schedule_limit=16
+
+#
 # The ABSOLUTE PATH OF fencing script used for Master to block worker lost its
 # heart-beat to zookeeper, script would be invoked by doing source with a single
 # target ip for worker.

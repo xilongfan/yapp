@@ -227,7 +227,6 @@ YAPP_MSG_CODE ZkClusterProxy::node_exists(const string & node_path) {
   return ret_code;
 }
 
-
 YAPP_MSG_CODE ZkClusterProxy::del_node(const string & node_path) {
   YAPP_MSG_CODE ret_code = YAPP_MSG_INVALID;
 
@@ -302,6 +301,7 @@ YAPP_MSG_CODE ZkClusterProxy::batch_create(
 
     ret_code = batch_create_atomic(sub_path_arr, sub_data_arr);
 
+    usleep(BATCH_OP_NICE_TIME_IN_MICRO_SEC);
     if (YAPP_MSG_SUCCESS != ret_code) { break; }
     prev = next;
   } /** end of for **/
@@ -346,8 +346,6 @@ YAPP_MSG_CODE ZkClusterProxy::batch_create_atomic(
               << " with ret of " << ret_val << std::endl;
 #endif
     if ((int)ZOK == ret_val) { ret_code = sync(path_arr.back()); }
-
-    usleep(BATCH_CREATE_NICE_TIME_IN_MICRO_SEC);
   }
 
   delete[] ops_set;
@@ -798,7 +796,8 @@ YAPP_MSG_CODE ZkClusterProxy::batch_delete(const vector<string> & nodes_todel) {
 }
 
 YAPP_MSG_CODE ZkClusterProxy::print_queue_stat(string & node_tree_ret,
-                                         const string & leaf_filter) {
+                                         const string & leaf_filter,
+                                         bool is_display_failed_only) {
   YAPP_MSG_CODE rc = YAPP_MSG_INVALID;
 
   string range_file_tsk_queue_path = get_rfile_task_queue_path_prefix();
@@ -937,11 +936,13 @@ YAPP_MSG_CODE ZkClusterProxy::print_queue_stat(string & node_tree_ret,
   vector<string> cur_queue_arr;
   vector<string> hnd_selec_arr;
   cur_queue_arr.push_back(failed_tsk_queue_path);
-  cur_queue_arr.push_back(new_tsk_queue_path);
-  cur_queue_arr.push_back(ready_tsk_queue_path);
-  cur_queue_arr.push_back(runn_tsk_queue_path);
-  cur_queue_arr.push_back(paused_queue_path);
-  cur_queue_arr.push_back(term_queue_path);
+  if (!is_display_failed_only) {
+    cur_queue_arr.push_back(new_tsk_queue_path);
+    cur_queue_arr.push_back(ready_tsk_queue_path);
+    cur_queue_arr.push_back(runn_tsk_queue_path);
+    cur_queue_arr.push_back(paused_queue_path);
+    cur_queue_arr.push_back(term_queue_path);
+  }
 
   int tot_tcnt_arr[] = { 0, 0, 0, 0, 0, 0, };
   int tcnt_arr[]     = { 0, 0, 0, 0, 0, 0, };
@@ -1906,6 +1907,67 @@ YAPP_MSG_CODE ZkClusterProxy::batch_move_node_with_no_children(
   return ret_code;
 }
 
+
+YAPP_MSG_CODE ZkClusterProxy::batch_set_create_and_delete(
+  const vector<string> & upd_path_arr, const vector<string> & upd_data_arr,
+  const vector<string> & path_to_cr_arr, const vector<string> & data_to_cr_arr,
+  const vector<string> & path_to_del)
+{
+  YAPP_MSG_CODE ret_code = YAPP_MSG_INVALID;
+
+  zhandle_t * zk_ptr = get_cur_zkptr_atomic();
+  assert(NULL != zk_ptr);
+
+  if ((upd_path_arr.size()   != upd_data_arr.size()) ||
+      (path_to_cr_arr.size() != data_to_cr_arr.size())
+  ) { return ret_code; }
+
+  int upd_cnt = upd_path_arr.size();
+  int cre_cnt = path_to_cr_arr.size();
+  int del_cnt = path_to_del.size();
+  int total_node_cnt = upd_cnt + cre_cnt + del_cnt;
+
+  zoo_op_t * ops_set = new zoo_op_t[total_node_cnt];
+  zoo_op_result_t * ret_set = new zoo_op_result_t[total_node_cnt];
+  assert(NULL != ops_set);
+  assert(NULL != ret_set);
+  memset(ops_set, 0, sizeof(zoo_op_t) * total_node_cnt);
+  memset(ret_set, 0, sizeof(zoo_op_result_t) * total_node_cnt);
+  char ret_path[MAX_PATH_LEN];
+
+  int base = 0;
+  for (int i = 0; i < upd_cnt; i++) {
+    zoo_set_op_init(&ops_set[i], upd_path_arr[i].c_str(), upd_data_arr[i].c_str(),
+                    upd_data_arr[i].size(), -1, NULL);
+  }
+
+  base += upd_cnt;
+  for (int i = 0; i < cre_cnt; i++) {
+    zoo_create_op_init(
+      &ops_set[i + base], path_to_cr_arr[i].c_str(), data_to_cr_arr[i].c_str(),
+      data_to_cr_arr[i].size(), &ZOO_OPEN_ACL_UNSAFE, 0, ret_path,
+      sizeof(ret_path)
+    );
+  }
+
+  base += cre_cnt;
+  for (int i = 0; i < del_cnt; i++) {
+    zoo_delete_op_init(&ops_set[i + base], path_to_del[i].c_str(), -1);
+  }
+
+  int rv = zoo_multi(zk_ptr, total_node_cnt, ops_set, ret_set);
+  if ((int)ZOK == rv) {
+    ret_code = YAPP_MSG_SUCCESS;
+  }
+
+  delete[] ops_set;
+  delete[] ret_set;
+  return ret_code;
+
+}
+
+
+
 YAPP_MSG_CODE ZkClusterProxy::batch_move_node_with_no_children_and_create_del(
   const vector<string> & path_from_arr, const vector<string> & path_to_arr,
   const vector<string> & data_arr,      const vector<string> & path_to_cr_arr,
@@ -2227,6 +2289,9 @@ bool ConfigureUtil::load_zk_cluster_cfg(const string & file_str) {
         }
         case YAPP_DAEMON_CFG_FILE_OPTION_LOG_CHECKING_RATE: {
           check_point_polling_rate_sec = opt_int; break;
+        }
+        case YAPP_DAEMON_CFG_FILE_OPTION_BATCH_SCHEDULE_LIMIT: {
+          batch_task_schedule_limit = opt_int; break;
         }
         case YAPP_DAEMON_CFG_FILE_OPTION_FENCING_SCRIPT_PATH: {
           fencing_script_path = opt_str; break;
