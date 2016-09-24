@@ -116,7 +116,6 @@ public:
     std::cerr << "$$$$ LOG FILE PATH: " << log_file_path << std::endl
               << "$$$$ ANCHOR PREFIX: " << anchor_prfx   << std::endl;
 #endif
-    
     string new_line = "", new_anchor = "";
     get_last_pos(
       log_file_path, anchor_prfx, MAX_LINES_TO_CHECK_STR, new_line, new_anchor
@@ -137,6 +136,8 @@ public:
         new_anchor = (new_line + DEF_LINE_AND_OFFSET_DELIM + new_anchor);
         new_line = StringUtil::convert_int_to_str(new_line_idx);
       }
+    } else if (atoi(job_type.c_str()) == (int)TASK_INPUT_TYPE::RANGE_FILE) {
+      new_anchor = (new_line + DEF_LINE_AND_OFFSET_DELIM + new_anchor);
     }
     StringUtil::trim_string(new_anchor);
     vector<string> path_arr, data_arr;
@@ -154,6 +155,7 @@ public:
         rc = zkc_proxy_ptr->batch_set(path_arr, data_arr);
       }
     }
+
     return rc;
   }
 
@@ -193,7 +195,7 @@ public:
 
     string cmd = "tail -n " + lines_to_check + " " + log_file_path +
                  " | grep -e \"^" + anchor_prfx +
-                 "\\([0-9]\\)\\+:[-+]\\?\\([0-9]\\)\\+$\" | sed \"s/^" + anchor_prfx +
+                 "\\([0-9]\\)\\+:[-+]\\?\\([a-zA-Z0-9]\\)\\+$\" | sed \"s/^" + anchor_prfx +
                  "//g\" | tail -1";
 #ifdef DEBUG_YAPP_SERVICE_UTIL
     std::cerr << "$$$$ COMMAND LINE: " << cmd << std::endl;
@@ -232,7 +234,7 @@ public:
     if (YAPP_MSG_SUCCESS == rc) { last_modified_epoch = atoll(job_anchor_epoch.c_str()); }
     return last_modified_epoch;
   }
-
+ 
   static long long get_last_modified_epoch_in_sec(const string & log_file_path) {
     struct stat finfo;
     long long last_modified_epoch = INVALID_TIME_EPOCH;
@@ -263,6 +265,43 @@ public:
                              string & tskhd_in_run, string & cur_line_idx,
                              string & nxt_line_idx, string & tot_proc_cnt
   );
+};
+
+class RangeFileTaskScheduleOp {
+public:
+  RangeFileTaskScheduleOp(int op_type, const string & path, const string & val) {
+    schedule_op_type = op_type; op_str_prev = path; op_str_next = val;
+  }
+  ~RangeFileTaskScheduleOp() {}
+  const static int TASK_SCHEDULE_OP_CREATE = 0;
+  const static int TASK_SCHEDULE_OP_DELETE = 1;
+  const static int TASK_SCHEDULE_OP_MOVE   = 2;
+  /**
+   * op will be either create/del/move a node
+   * for create, op_str_prev is the path, op_str_next is the value
+   * for delete, op_str_prev is the path, op_str_next should be empty
+   * for move, op_str_prev is the old path, op_str_next should be new path
+   */
+  string op_str_prev, op_str_next;
+  int schedule_op_type;
+};
+
+class RangeFileTaskScheduleList{
+public:
+  RangeFileTaskScheduleList(int batch_size_limit) {
+    max_batch_schedule_ops_size = batch_size_limit;
+  }
+  ~RangeFileTaskScheduleList() {}
+  bool is_schedule_list_exceed_batch_limit() {
+    return ((int)task_schedule_ops.size() <= max_batch_schedule_ops_size);
+  }
+  bool append_task_schedule_op(RangeFileTaskScheduleOp & schedule_op) {
+    if (!is_schedule_list_exceed_batch_limit()) { return false; }
+    task_schedule_ops.push_back(schedule_op);
+    return true;
+  }
+  vector<RangeFileTaskScheduleOp> task_schedule_ops;
+  int max_batch_schedule_ops_size;
 };
 
 class YappServerInfo {

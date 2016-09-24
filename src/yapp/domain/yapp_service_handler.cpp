@@ -568,7 +568,8 @@ void * YappServiceHandler::thread_schedule_rfile_tasks(void * srv_ptr)
          * may cause a fsync spike on the zookeeper.
          */
         pthread_mutex_lock(&yapp_inst_mutex);
-        schedule_rfile_tasks(ym_srv_ptr);
+        // schedule_rfile_tasks(ym_srv_ptr);
+        schedule_rfile_tasks_in_batch(ym_srv_ptr);
         pthread_mutex_unlock(&yapp_inst_mutex);
       } else { break; }
 
@@ -598,8 +599,773 @@ void * YappServiceHandler::thread_schedule_rfile_tasks(void * srv_ptr)
 
 }
 
-bool YappServiceHandler::schedule_rfile_tasks(
-  YappServiceHandler * ym_srv_ptr)
+bool YappServiceHandler::fetch_queue_and_filter_failed_rftasks(
+  YappServiceHandler * ym_srv_ptr,
+  vector<string> & rf_running_subtsk_arr, vector<string> & rf_subtask_arr,
+  vector<string> & rf_failed_subtsk_arr, YappSubtaskQueue & rf_running_subtask_queue,
+  YappSubtaskQueue & rf_subtask_queue, YappSubtaskQueue & rf_failed_task_queue
+)
+{
+  vector<string> tp_rf_subtask_arr, tp_rf_running_subtsk_arr;
+
+  int rc = rf_running_subtask_queue.get_task_queue(tp_rf_running_subtsk_arr, ym_srv_ptr->zkc_proxy_ptr);
+  if (YAPP_MSG_SUCCESS != rc) { return false; }
+  rc = rf_failed_task_queue.get_task_queue(rf_failed_subtsk_arr, ym_srv_ptr->zkc_proxy_ptr);
+  if (YAPP_MSG_SUCCESS != rc) { return false; }
+  rc = rf_subtask_queue.get_task_queue(tp_rf_subtask_arr, ym_srv_ptr->zkc_proxy_ptr);
+  if (YAPP_MSG_SUCCESS != rc) { return false; }
+
+  /** needs to clean the task arr for those failed tasks **/
+  int failed_cnt = rf_failed_subtsk_arr.size();
+  if (0 < failed_cnt) {
+    bool matched = false;
+    int  task_size = tp_rf_running_subtsk_arr.size();
+    for (int c = 0; c < task_size; c++) {
+      matched = false;
+      for (int i = 0; i < failed_cnt; i++) {
+        if (rf_failed_subtsk_arr[i] == tp_rf_running_subtsk_arr[c]){
+          matched = true;
+          break;
+        }
+      }
+      if (false == matched) {
+        rf_running_subtsk_arr.push_back(tp_rf_running_subtsk_arr[c]);
+      }
+    }
+    task_size = tp_rf_subtask_arr.size();
+    for (int c = 0; c < task_size; c++) {
+      matched = false;
+      for (int i = 0; i < failed_cnt; i++) {
+        if (0 == tp_rf_subtask_arr[c].find(rf_failed_subtsk_arr[i])){
+          matched = true;
+          break;
+        }
+      }
+      if (false == matched) {
+        rf_subtask_arr.push_back(tp_rf_subtask_arr[c]);
+      }
+    }
+  } else {
+    rf_running_subtsk_arr = tp_rf_running_subtsk_arr;
+    rf_subtask_arr = tp_rf_subtask_arr;
+  }
+  
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+  std::cerr << "-- TRYING TO CHECK RANGE FILE TASKS IN QUEUE: "
+            << rf_subtask_queue.get_queue_path() << std::endl
+            << "-- THREAD: " << pthread_self() << " IN MASTER INSTANCE. "
+            << ym_srv_ptr->zkc_proxy_ptr->get_host_str_in_pcb()
+            << std::endl;
+  std::cerr << ">> RANGE FILE TASKS: " << std::endl;
+  for (size_t x = 0; x < rf_subtask_arr.size(); x++) {
+    std::cerr << rf_subtask_arr[x] << " " << std::endl;
+  }
+  std::cerr << std::endl;
+#endif
+  return true;
+}
+
+void YappServiceHandler::setup_rftasks_queue_path(YappServiceHandler * ym_srv_ptr,
+                                                  YappSubtaskQueue & rf_running_subtask_queue,
+                                                  YappSubtaskQueue & rf_subtask_queue,
+                                                  YappSubtaskQueue & rf_failed_task_queue,
+                                                  const string & rf_task_to_schedule)
+{
+  /** setup the default path for all related queues under certain task */
+  rf_running_subtask_queue.set_queue_path(
+    ym_srv_ptr->zkc_proxy_ptr->get_rfile_task_queue_path_prefix() + "/" +
+    rf_task_to_schedule + "/running_procs"
+  );
+  rf_subtask_queue.set_queue_path(
+    ym_srv_ptr->zkc_proxy_ptr->get_rfile_task_queue_path_prefix() + "/" +
+    rf_task_to_schedule + "/proc_arr"
+  );
+  rf_failed_task_queue.set_queue_path(
+    ym_srv_ptr->zkc_proxy_ptr->get_rfile_task_queue_path_prefix() + "/" +
+    rf_task_to_schedule + "/failed_procs"
+  );
+}
+
+/**
+ * Inputs:
+ *   rf_subtask_arr:            p0, p1, p2
+ *   rf_running_subtsk_arr:     p0
+ * Output:
+ *   terminated_subtsk_arr:     p1, p2
+ *   rf_running_subtsk_idx_arr: 0
+ *   terminated_subtsk_idx_arr: 1, 2
+ */
+void YappServiceHandler::find_all_current_index_for_running_and_terminated_processes(
+    vector<string> & rf_subtask_arr,        vector<string> & rf_running_subtsk_arr,
+    vector<string> & terminated_subtsk_arr, vector<int> & rf_running_subtsk_idx_arr,
+                                            vector<int> & terminated_subtsk_idx_arr
+) {
+  int runtsk_cnt = rf_running_subtsk_arr.size();
+  int subtsk_cnt = rf_subtask_arr.size();
+  int runtsk_idx = 0;
+  size_t hnd_pos = string::npos;
+  /**
+   * 2.1, grab sub-tasks that are already being terminated(not found under
+   *      the folder /foo/yapp/queue/textrfin/${task_hnd}/running_procs
+   *      and duck all into terminated_subtsk_arr);
+   */
+  for (int c = 0; c < subtsk_cnt; c++) {
+    /**
+     * TODO:
+     * If this is a new task or prev. one already finished.
+     * - push current task to the NEW queue
+     * - increase the current line index by its offset.
+     * - it is possible that subtsk_str => ${cur_tskstr}_delim_${nxt_tskstr}
+     *                 while runtsk_str => ${cur_tskstr}
+     *   since subtsk_str was helped by others and nxt_tskstr is next tsk.
+     * - if the tasks were failed for any other reason, the remaining stops
+     */
+    string subtsk_str = rf_subtask_arr[c];
+    if (runtsk_idx < runtsk_cnt) {
+      hnd_pos = subtsk_str.find(rf_running_subtsk_arr[runtsk_idx]);
+      if (0 != hnd_pos) {
+        terminated_subtsk_arr.push_back(subtsk_str);
+        terminated_subtsk_idx_arr.push_back(c);
+      } else {
+        rf_running_subtsk_idx_arr.push_back(c);
+        runtsk_idx++;
+      }
+    } else {
+      terminated_subtsk_arr.push_back(subtsk_str);
+      terminated_subtsk_idx_arr.push_back(c);
+    }
+  }
+}
+
+bool YappServiceHandler::is_subtask_finished_all_its_own_chunk(const string & task_hndl) {
+  string tskhd_in_job, max_line_idx, tskhd_in_run,
+         cur_line_idx, nxt_line_idx, tot_proc_cnt;
+  RangeFileTaskDataParser::parse_rfile_task_data_str(
+    task_hndl, tskhd_in_job, max_line_idx, tskhd_in_run,
+    cur_line_idx, nxt_line_idx, tot_proc_cnt
+  );
+  long long max_line_idn = atoll(max_line_idx.c_str());
+  long long nxt_line_idn = atoll(nxt_line_idx.c_str());
+  return ((tskhd_in_job != tskhd_in_run) || (nxt_line_idn > max_line_idn));
+}
+
+bool YappServiceHandler::check_schedule_batch_limit(
+  vector<string> & new_rf_subtsk_arr, int batch_limit)
+{
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+  std::cerr << ">>>> new_rf_subtsk_arr: " << new_rf_subtsk_arr.size()
+            << " batch-op-limit: " << batch_limit
+            << " check_schedule_batch_limit" << std::endl;
+#endif
+  return ((int)(new_rf_subtsk_arr.size()) <= batch_limit);
+}
+
+bool YappServiceHandler::check_and_schedule_jobs_directly_owned_by_each_process(
+  vector<string> & rf_subtask_arr, vector<string> & terminated_subtsk_arr,
+  vector<string> & new_rf_subtsk_arr, vector<int> & new_rf_subtsk_idx_arr,
+  vector<int> & terminated_subtsk_idx_arr,
+  list<string> & fin_rf_subtsk_arr, list<string> & fin_rf_subtsk_full_hnd_arr,
+  list<string> & subtsk_list_before_change, list<string> & subtsk_list_after_change,
+  YappSubtaskQueue & rf_subtask_queue, int batch_limit
+) {
+  /**
+   * 2.2, check to find which set of execution already done its own portion.
+   *
+   * - If the current execution is processing its own part:
+   *
+   *   - If there are still some portion left for that partition, simply
+   *     update its current and next row idx for the file to process and
+   *     put it to vector new_rf_subtsk_arr.
+   *
+   *   - If the last chunk already being finished, then put it to another
+   *     list fin_rf_subtsk_arr
+   *
+   * - or current execution finished helping for chunks from other procs:
+   *   - also put to list fin_rf_subtsk_arr.
+   */
+  int tertsk_cnt = terminated_subtsk_arr.size();
+  size_t hnd_pos = string::npos;
+  bool is_within_schedule_limit = check_schedule_batch_limit(new_rf_subtsk_arr, batch_limit);
+  for (int s = 0; ((s < tertsk_cnt) && (true == is_within_schedule_limit)); s++) {
+    hnd_pos = terminated_subtsk_arr[s].find(NEW_DELM_STR);
+    string prev_tsk_chunk_str = terminated_subtsk_arr[s];
+    string next_tsk_chunk_str = terminated_subtsk_arr[s];
+    if (string::npos != hnd_pos) {
+      prev_tsk_chunk_str = prev_tsk_chunk_str.substr(0, hnd_pos);
+      next_tsk_chunk_str = next_tsk_chunk_str.substr(
+        hnd_pos + NEW_DELM_STR.size()
+      );
+    }
+
+    string tskhd_in_job, max_line_idx, tskhd_in_run,
+           cur_line_idx, nxt_line_idx, tot_proc_cnt;
+
+    bool ret = RangeFileTaskDataParser::parse_rfile_task_data_str(
+      next_tsk_chunk_str, tskhd_in_job, max_line_idx, tskhd_in_run,
+                          cur_line_idx, nxt_line_idx, tot_proc_cnt
+    );
+
+    if (true != ret) { continue; }
+
+    long long tot_proc_cot = atoll(tot_proc_cnt.c_str());
+    long long max_line_idn = atoll(max_line_idx.c_str());
+    long long cur_line_idn = atoll(cur_line_idx.c_str());
+    long long nxt_line_idn = atoll(nxt_line_idx.c_str());
+
+    cur_line_idn += tot_proc_cot;
+    nxt_line_idn += tot_proc_cot;
+
+    if ((tskhd_in_job == tskhd_in_run) && (cur_line_idn <= max_line_idn)) {
+      new_rf_subtsk_arr.push_back(
+        tskhd_in_job +
+          MAX_LINE_STR + max_line_idx + CUR_HNDL_STR + tskhd_in_run +
+          CUR_LINE_STR + StringUtil::convert_int_to_str(cur_line_idn) +
+          NXT_LINE_STR + StringUtil::convert_int_to_str(nxt_line_idn) +
+          TOT_PROC_STR + tot_proc_cnt
+      );
+      new_rf_subtsk_idx_arr.push_back(terminated_subtsk_idx_arr[s]);
+      subtsk_list_before_change.push_back(
+        rf_subtask_queue.get_queue_path() + "/" +
+        rf_subtask_arr[terminated_subtsk_idx_arr[s]]
+      );
+      subtsk_list_after_change.push_back(
+        rf_subtask_queue.get_queue_path() + "/" + new_rf_subtsk_arr.back()
+      );
+    } else {
+      fin_rf_subtsk_arr.push_back(prev_tsk_chunk_str);
+      fin_rf_subtsk_full_hnd_arr.push_back(terminated_subtsk_arr[s]);
+    }
+    is_within_schedule_limit = check_schedule_batch_limit(new_rf_subtsk_arr, batch_limit);
+  } /* for (int s = 0; s < tertsk_cnt; s++) */
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+  std::cerr << ">>>> " << is_within_schedule_limit << " check_and_schedule_jobs_directly_owned_by_each_process" << std::endl;
+#endif
+  return is_within_schedule_limit;
+}
+
+bool YappServiceHandler::check_and_schedule_to_help_terminated_processes( 
+  vector<string> & new_rf_subtsk_arr, vector<int> & new_rf_subtsk_idx_arr,
+  list<string> & subtsk_list_before_change, list<string> & subtsk_list_after_change,
+  list<string> & fin_rf_subtsk_arr, list<string> & fin_rf_subtsk_full_hnd_arr,
+  vector<string> & rf_subtask_arr, YappSubtaskQueue & rf_subtask_queue, int batch_limit)
+{
+  /**
+   * 2.3, For every execution done its own job in fin_rf_subtsk_arr:
+   *      - look for some other chunks left within the same task set.
+   *        (process with proc_hnd having lower lexi order come first)
+   *      - put the new subtask to vector new_rf_subtsk_arr.
+   */
+  /** 2.3-1, find if any finished tasks have certain partiions left. **/
+  int newtsk_cnt = new_rf_subtsk_arr.size();
+  int cur_subtsk_idx = 0;
+  // list<string>::iterator subtsk_bf_itr = subtsk_list_before_change.begin();
+  list<string>::iterator subtsk_af_itr = subtsk_list_after_change.begin();
+  size_t fin_rf_arr_size = fin_rf_subtsk_arr.size();
+
+  bool is_within_schedule_limit = check_schedule_batch_limit(new_rf_subtsk_arr, batch_limit);
+  for (int z = 0; ((z < newtsk_cnt) && (!fin_rf_subtsk_arr.empty()) &&
+                   (true == is_within_schedule_limit));)
+  {
+    fin_rf_arr_size = fin_rf_subtsk_arr.size();
+    string active_tskhd_in_job, active_max_line_idx, active_tskhd_in_run,
+           active_cur_line_idx, active_nxt_line_idx, active_tot_proc_cnt;
+    cur_subtsk_idx = new_rf_subtsk_idx_arr[z];
+    size_t hnd_pos = rf_subtask_arr[cur_subtsk_idx].find(NEW_DELM_STR);
+
+    string next_tsk_chunk_str = rf_subtask_arr[cur_subtsk_idx];
+    if (string::npos != hnd_pos) {
+      next_tsk_chunk_str = next_tsk_chunk_str.substr(
+        hnd_pos + NEW_DELM_STR.size()
+      );
+    }
+    bool ret = RangeFileTaskDataParser::parse_rfile_task_data_str(
+      next_tsk_chunk_str,
+      active_tskhd_in_job, active_max_line_idx, active_tskhd_in_run,
+      active_cur_line_idx, active_nxt_line_idx, active_tot_proc_cnt
+    );
+    assert(true == ret);
+    long long tot_proc_cnt = atoll(active_tot_proc_cnt.c_str());
+    long long max_line_idn = atoll(active_max_line_idx.c_str());
+    long long cur_line_idn = atoll(active_cur_line_idx.c_str());
+    long long nxt_line_idn = atoll(active_nxt_line_idx.c_str());
+
+    cur_line_idn += tot_proc_cnt * 2;
+    nxt_line_idn += tot_proc_cnt * 2;
+
+    /** only those tasks not finished its own part needs help. **/
+    if ((active_tskhd_in_job != active_tskhd_in_run) ||
+        (cur_line_idn > max_line_idn)) {
+      z++; subtsk_af_itr++; continue; // subtsk_bf_itr++; 
+    }
+
+    /** start to dispatch remaining workloads over diff. processes **/
+    for (string fin_subtsk_in_job = fin_rf_subtsk_arr.front();
+         ((cur_line_idn <= max_line_idn) && (!fin_rf_subtsk_arr.empty()) &&
+          (true == is_within_schedule_limit));
+         fin_rf_subtsk_arr.pop_front(),
+         fin_rf_subtsk_full_hnd_arr.pop_front())
+    {
+      fin_subtsk_in_job = fin_rf_subtsk_arr.front();
+      if (false == is_subtask_finished_all_its_own_chunk(fin_subtsk_in_job)) { continue; }
+      string fin_tskhd_in_job, fin_max_line_idx, fin_tskhd_in_run,
+             fin_cur_line_idx, fin_nxt_line_idx, fin_tot_proc_cnt;
+      ret = RangeFileTaskDataParser::parse_rfile_task_data_str (
+        fin_subtsk_in_job,
+        fin_tskhd_in_job, fin_max_line_idx, fin_tskhd_in_run,
+        fin_cur_line_idx, fin_nxt_line_idx, fin_tot_proc_cnt
+      );
+      assert(true == ret);
+      new_rf_subtsk_arr.push_back(
+        fin_tskhd_in_job + MAX_LINE_STR + active_max_line_idx +
+        CUR_HNDL_STR + active_tskhd_in_run + CUR_LINE_STR +
+        StringUtil::convert_int_to_str(cur_line_idn) + NXT_LINE_STR +
+        StringUtil::convert_int_to_str(nxt_line_idn) + TOT_PROC_STR +
+        active_tot_proc_cnt
+      );
+      subtsk_list_before_change.push_back(
+        rf_subtask_queue.get_queue_path() + "/" + 
+        fin_rf_subtsk_full_hnd_arr.front()
+      );
+      subtsk_list_after_change.push_back(
+        rf_subtask_queue.get_queue_path() + "/" + new_rf_subtsk_arr.back()
+      );
+
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+      std::cerr << ">>>> CHECK TO HELP THOSE NOT RUNNING TASKS." << std::endl;
+      std::cerr << ">>>> FIN TASK: " << fin_subtsk_in_job << std::endl;
+      std::cerr << "     WIL HELP: " << next_tsk_chunk_str << std::endl;
+      std::cerr << "     NEW TASK: " << new_rf_subtsk_arr.back() << std::endl;
+#endif
+      cur_line_idn = nxt_line_idn; 
+      nxt_line_idn += tot_proc_cnt;
+
+      is_within_schedule_limit = check_schedule_batch_limit(new_rf_subtsk_arr, batch_limit);
+    }
+    if (fin_rf_arr_size > fin_rf_subtsk_arr.size()) {
+      /** enter here means we did some re-balancing **/
+      string new_task_str =
+        active_tskhd_in_job + MAX_LINE_STR + active_max_line_idx +
+        CUR_HNDL_STR + active_tskhd_in_run + CUR_LINE_STR +
+        StringUtil::convert_int_to_str(cur_line_idn - tot_proc_cnt) + NXT_LINE_STR +
+        StringUtil::convert_int_to_str(nxt_line_idn - tot_proc_cnt) + TOT_PROC_STR +
+        active_tot_proc_cnt;
+
+      *subtsk_af_itr = rf_subtask_queue.get_queue_path() + "/" +
+                       new_rf_subtsk_arr[z] + NEW_DELM_STR + new_task_str;
+
+    }
+    if (cur_line_idn > max_line_idn) {
+      z++; subtsk_af_itr++;
+    }
+  } /* for (int z = 0; z < newtsk_cnt && !fin_rf_subtsk_arr.empty();) */
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+  std::cerr << ">>>> " << is_within_schedule_limit << " check_and_schedule_to_help_terminated_processes" << std::endl;
+#endif
+  return is_within_schedule_limit;
+}
+
+bool YappServiceHandler::check_and_schedule_to_help_running_processes( 
+  vector<string> & new_rf_subtsk_arr, vector<int> & new_rf_subtsk_idx_arr,
+  list<string> & subtsk_list_before_change, list<string> & subtsk_list_after_change,
+  list<string> & fin_rf_subtsk_arr, list<string> & fin_rf_subtsk_full_hnd_arr,
+  vector<string> & rf_subtask_arr, vector<int> & rf_running_subtsk_idx_arr,
+  YappSubtaskQueue & rf_subtask_queue, int batch_limit
+) {
+  int runtsk_cnt = rf_running_subtsk_idx_arr.size();
+  int cur_subtsk_idx = 0;
+  bool is_within_schedule_limit = check_schedule_batch_limit(new_rf_subtsk_arr, batch_limit);
+  /** 2.3-2, find if any running tasks have certain partitions left. **/
+  for (int x = 0; ((x < runtsk_cnt) && (!fin_rf_subtsk_arr.empty()) &&
+                   (true == is_within_schedule_limit));)
+  {
+    string active_tskhd_in_job, active_max_line_idx, active_tskhd_in_run,
+           active_cur_line_idx, active_nxt_line_idx, active_tot_proc_cnt;
+
+    size_t fin_rf_arr_size = fin_rf_subtsk_arr.size();
+    cur_subtsk_idx = rf_running_subtsk_idx_arr[x];
+    size_t hnd_pos = rf_subtask_arr[cur_subtsk_idx].find(NEW_DELM_STR);
+
+    string next_tsk_chunk_str = rf_subtask_arr[cur_subtsk_idx];
+    string prev_tsk_chunk_str = rf_subtask_arr[cur_subtsk_idx];
+    if (string::npos != hnd_pos) {
+      /** reaching here basically means a running task helped by others **/
+      prev_tsk_chunk_str = next_tsk_chunk_str.substr(0, hnd_pos);
+      next_tsk_chunk_str = next_tsk_chunk_str.substr(
+        hnd_pos + NEW_DELM_STR.size()
+      );
+    }
+
+    bool ret = RangeFileTaskDataParser::parse_rfile_task_data_str(
+      next_tsk_chunk_str,
+      active_tskhd_in_job, active_max_line_idx, active_tskhd_in_run,
+      active_cur_line_idx, active_nxt_line_idx, active_tot_proc_cnt
+    );
+
+    assert(true == ret);
+
+    long long tot_proc_cnt = atoll(active_tot_proc_cnt.c_str());
+    long long max_line_idn = atoll(active_max_line_idx.c_str());
+    long long cur_line_idn = atoll(active_cur_line_idx.c_str());
+    long long nxt_line_idn = atoll(active_nxt_line_idx.c_str());
+
+    cur_line_idn += tot_proc_cnt;
+    nxt_line_idn += tot_proc_cnt;
+
+    if ((active_tskhd_in_job != active_tskhd_in_run) ||
+        (cur_line_idn > max_line_idn)) { x++; continue; }
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+    std::cerr << ">>>> START LOOPING ON A RUNNING TSK, CUR_ID:"
+              << cur_line_idn << ", NXT_ID: " << nxt_line_idn
+              << std::endl;
+#endif
+    /** start to dispatch remaining workloads over diff. processes **/
+    for (string fin_subtsk_in_job = fin_rf_subtsk_arr.front();
+         ((cur_line_idn <= max_line_idn) && (!fin_rf_subtsk_arr.empty()) &&
+          (true == is_within_schedule_limit));
+         fin_rf_subtsk_arr.pop_front(),
+         fin_rf_subtsk_full_hnd_arr.pop_front())
+    {
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+      std::cerr << ">>>> CUR_ID:" << cur_line_idn << ", NXT_ID: " << nxt_line_idn
+                << std::endl;
+#endif
+      fin_subtsk_in_job = fin_rf_subtsk_arr.front();
+      if (false == is_subtask_finished_all_its_own_chunk(fin_subtsk_in_job)) { continue; }
+      string fin_tskhd_in_job, fin_max_line_idx, fin_tskhd_in_run,
+             fin_cur_line_idx, fin_nxt_line_idx, fin_tot_proc_cnt;
+      ret = RangeFileTaskDataParser::parse_rfile_task_data_str (
+        fin_subtsk_in_job,
+        fin_tskhd_in_job, fin_max_line_idx, fin_tskhd_in_run,
+        fin_cur_line_idx, fin_nxt_line_idx, fin_tot_proc_cnt
+      );
+      assert(true == ret);
+
+      new_rf_subtsk_arr.push_back(
+        fin_tskhd_in_job + MAX_LINE_STR + active_max_line_idx +
+        CUR_HNDL_STR + active_tskhd_in_run + CUR_LINE_STR +
+        StringUtil::convert_int_to_str(cur_line_idn) + NXT_LINE_STR +
+        StringUtil::convert_int_to_str(nxt_line_idn) + TOT_PROC_STR +
+        active_tot_proc_cnt
+      );
+
+      subtsk_list_before_change.push_back(
+        rf_subtask_queue.get_queue_path() + "/" +
+        fin_rf_subtsk_full_hnd_arr.front()
+      );
+      subtsk_list_after_change.push_back(
+        rf_subtask_queue.get_queue_path() + "/" + new_rf_subtsk_arr.back()
+      );
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+      std::cerr << ">>>> CHECK TO HELP THOSE RUNNING TASKS." << std::endl;
+      std::cerr << ">>>> FIN TASK: " << fin_subtsk_in_job << std::endl;
+      std::cerr << "     WIL HELP: " << next_tsk_chunk_str << std::endl;
+      std::cerr << "     NEW TASK: " << new_rf_subtsk_arr.back() << std::endl;
+#endif
+      cur_line_idn = nxt_line_idn; 
+      nxt_line_idn += tot_proc_cnt;
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+      std::cerr << ">>>> CUR_ID:" << cur_line_idn << ", NXT_ID: " << nxt_line_idn
+                << std::endl;
+#endif
+      is_within_schedule_limit = check_schedule_batch_limit(new_rf_subtsk_arr, batch_limit);
+    }
+    if (fin_rf_arr_size > fin_rf_subtsk_arr.size()) {
+    /**
+     * - For those subtask being helped, we only update its new task string
+     *   (which indicates next row to process) as its value under proc_arr
+     *   folder only, so that the workers does not need to block to wait for
+     *   the thread to finish(they only update the running_proc folder).
+     * - For every subtask being helped, it will be changed to the format as
+     *   ${old_tskstr}_delim_${new_tskstr} under folder proc_arr;
+     */
+      string new_task_str =
+        active_tskhd_in_job + MAX_LINE_STR + active_max_line_idx +
+        CUR_HNDL_STR + active_tskhd_in_run + CUR_LINE_STR +
+        StringUtil::convert_int_to_str(cur_line_idn - tot_proc_cnt) + NXT_LINE_STR +
+        StringUtil::convert_int_to_str(nxt_line_idn - tot_proc_cnt) + TOT_PROC_STR +
+        active_tot_proc_cnt;
+      subtsk_list_before_change.push_back(
+        rf_subtask_queue.get_queue_path() + "/" + rf_subtask_arr[cur_subtsk_idx]
+      );
+      subtsk_list_after_change.push_back(
+        rf_subtask_queue.get_queue_path() + "/" +
+        prev_tsk_chunk_str + NEW_DELM_STR + new_task_str
+      );
+    }
+    if (cur_line_idn > max_line_idn) { x++; }
+  } /* for (int x = 0; x < runtsk_cnt && !fin_rf_subtsk_arr.empty();) */
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+  std::cerr << ">>>> " << is_within_schedule_limit << " check_and_schedule_to_help_running_processes" << std::endl;
+#endif
+  return is_within_schedule_limit;
+}
+
+void YappServiceHandler::check_and_clear_free_processes(
+  vector<string> & new_rf_subtsk_arr,  vector<string> & rf_failed_subtsk_arr,
+  vector<string> & rf_running_subtsk_arr, vector<string> & rf_subtask_arr,
+  list<string> & fin_rf_subtsk_full_hnd_arr, YappSubtaskQueue & rf_subtask_queue,
+  YappServiceHandler * ym_srv_ptr
+) {
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+  std::cerr << "-- check_and_clear_free_processes"
+            << " new_rf_subtsk_arr: " << new_rf_subtsk_arr.size()
+            << " rf_failed_subtsk_arr: " << rf_failed_subtsk_arr.size()
+            << " rf_running_subtsk_arr: " << rf_running_subtsk_arr.size()
+            << " rf_subtask_arr: " << rf_subtask_arr.size()
+            << " fin_rf_subtsk_full_hnd_arr: " << fin_rf_subtsk_full_hnd_arr.size()
+            << std::endl;
+#endif
+  if (!rf_running_subtsk_arr.empty() || !new_rf_subtsk_arr.empty() ||
+      !rf_failed_subtsk_arr.empty()) { return; }
+  if ((rf_subtask_arr.size() + rf_failed_subtsk_arr.size()) !=
+       fin_rf_subtsk_full_hnd_arr.size()) { return; }
+
+  vector<string> path_to_del(fin_rf_subtsk_full_hnd_arr.begin(),
+                             fin_rf_subtsk_full_hnd_arr.end());
+   /** gethering all tasks finished and no more subtasks lefted for them **/
+  int tsk_to_del_cnt = path_to_del.size();
+
+  /**
+   * for those processes finished and no other chunks left for them to help,
+   * we would mark them as terminated under the job node structure.
+   */
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  vector<string> upd_path_arr;
+  vector<string> upd_data_arr;
+  vector<string> path_to_cr_arr;
+  vector<string> data_to_cr_arr;
+  for (int y = 0; y < tsk_to_del_cnt; y++) {
+    string upd_proc_path = ym_srv_ptr->zkc_proxy_ptr->get_proc_full_path(
+      path_to_del[y].substr(0, path_to_del[y].find(MAX_LINE_STR))
+    );
+    upd_path_arr.push_back(upd_proc_path + "/cur_status"); 
+    upd_data_arr.push_back(
+      StringUtil::convert_int_to_str(PROC_STATUS_CODE::PROC_STATUS_TERMINATED)
+    );
+  }
+
+  for (int y = 0; y <  tsk_to_del_cnt; y++) {
+    /** for the purpose of logging, we keep last chunk for each proc **/
+    path_to_cr_arr.push_back(
+      ym_srv_ptr->zkc_proxy_ptr->get_terminated_queue_path_prefix() + "/" +
+      path_to_del[y]
+    );
+    data_to_cr_arr.push_back("");
+    path_to_del[y] =
+      rf_subtask_queue.get_queue_path() + "/" + path_to_del[y];
+  }
+
+  YAPP_MSG_CODE ret_code = set_create_and_delete_in_small_batch(
+    upd_path_arr, upd_data_arr, path_to_cr_arr, data_to_cr_arr, path_to_del, ym_srv_ptr
+  );
+#ifdef DEBUG_YAPP_SERVICE_HANDLER
+  std::cerr << "-- set_create_and_delete_in_small_batch: " << ret_code << std::endl;
+#endif
+}
+
+YAPP_MSG_CODE YappServiceHandler::set_create_and_delete_in_small_batch(
+  const vector<string> & upd_path_arr, const vector<string> & upd_data_arr,
+  const vector<string> & path_to_cr_arr, const vector<string> & data_to_cr_arr,
+  const vector<string> & path_to_del, YappServiceHandler * ym_srv_ptr
+) {
+  YAPP_MSG_CODE ret_code = YAPP_MSG_INVALID;
+  int tot_size = path_to_cr_arr.size();
+  int itr_cnts = tot_size / yapp::util::MAX_BATCH_CREATE_CHUNK;
+  int tsk_remn = tot_size - itr_cnts * yapp::util::MAX_BATCH_CREATE_CHUNK;
+  if (tsk_remn > 0) { itr_cnts++; }
+ 
+  int prev = 0;
+  int next = 0;
+  vector<string>::const_iterator updp_prev_itr = upd_path_arr.begin();
+  vector<string>::const_iterator updp_next_itr = upd_path_arr.begin();
+  vector<string>::const_iterator updd_prev_itr = upd_data_arr.begin();
+  vector<string>::const_iterator updd_next_itr = upd_data_arr.begin();
+  vector<string>::const_iterator delp_prev_itr = path_to_del.begin();
+  vector<string>::const_iterator delp_next_itr = path_to_del.begin();
+
+  vector<string>::const_iterator path_prev_itr = path_to_cr_arr.begin();
+  vector<string>::const_iterator path_next_itr = path_to_cr_arr.begin();
+  vector<string>::const_iterator data_prev_itr = data_to_cr_arr.begin();
+  vector<string>::const_iterator data_next_itr = data_to_cr_arr.begin();
+
+  for (int c = 0; c < itr_cnts; c++)
+  {
+    next += yapp::util::MAX_BATCH_CREATE_CHUNK;
+    next = (next > tot_size) ? tot_size : next;
+
+    path_prev_itr = path_to_cr_arr.begin() + prev;
+    path_next_itr = path_to_cr_arr.begin() + next;
+    data_prev_itr = data_to_cr_arr.begin() + prev;
+    data_next_itr = data_to_cr_arr.begin() + next;
+
+
+    updp_prev_itr = upd_path_arr.begin() + prev;
+    updp_next_itr = upd_path_arr.begin() + next;
+    updd_prev_itr = upd_data_arr.begin() + prev;
+    updd_next_itr = upd_data_arr.begin() + next;
+    delp_prev_itr = path_to_del.begin() + prev;
+    delp_next_itr = path_to_del.begin() + next;
+
+    vector<string> sub_updp_arr(updp_prev_itr, updp_next_itr);
+    vector<string> sub_updd_arr(updd_prev_itr, updd_next_itr);
+    vector<string> sub_path_arr(path_prev_itr, path_next_itr);
+    vector<string> sub_data_arr(data_prev_itr, data_next_itr);
+    vector<string> sub_delp_arr(delp_prev_itr, delp_next_itr);
+
+    ret_code = ym_srv_ptr->zkc_proxy_ptr->batch_set_create_and_delete(
+      sub_updp_arr, sub_updd_arr, sub_path_arr, sub_data_arr, sub_delp_arr
+    );
+
+    usleep(BATCH_OP_NICE_TIME_IN_MICRO_SEC);
+    if (YAPP_MSG_SUCCESS != ret_code) { break; }
+    prev = next;
+  } /** end of for **/
+  return ret_code;
+}
+
+void YappServiceHandler::commit_range_file_task_schedule_plan(
+  YappServiceHandler * ym_srv_ptr, YappSubtaskQueue & rf_subtask_queue,
+  YappSubtaskQueue & rf_running_subtask_queue,
+  list<string> & subtsk_list_before_change, list<string> & subtsk_list_after_change,
+  list<string> & fin_rf_subtsk_full_hnd_arr, vector<string> & new_rf_subtsk_arr
+)
+{
+  /**
+   * 2.4, start them all in new_rf_subtsk_arr(throw into NEW queue)
+   */
+  vector<string> path_to_cr_arr;
+  vector<string> data_to_cr_arr;
+  vector<string> path_from_arr(subtsk_list_before_change.begin(),
+                               subtsk_list_before_change.end());
+  vector<string> path_to_arr(subtsk_list_after_change.begin(),
+                             subtsk_list_after_change.end());
+  vector<string> data_arr;
+  vector<string> path_to_del; /** DUMMY VARS **/
+  int change_cnt = path_to_arr.size();
+  for (int y = 0; y < change_cnt; y++) { data_arr.push_back(""); }
+  int tsk_to_cr_cnt = new_rf_subtsk_arr.size();
+  /** gethering all new tasks to the running folder & new queue **/
+  for (int y = 0; y < tsk_to_cr_cnt; y++) {
+    path_to_cr_arr.push_back(
+      rf_running_subtask_queue.get_queue_path() + "/" + new_rf_subtsk_arr[y]
+    );
+    data_to_cr_arr.push_back("");
+    path_to_cr_arr.push_back(
+      ym_srv_ptr->newly_cr_task_queue_proxy.get_queue_path() + "/" +
+      new_rf_subtsk_arr[y]
+    );
+    data_to_cr_arr.push_back("");
+  }
+  /** execute them in batch (atomic via zookeeper muti api)**/
+  ym_srv_ptr->zkc_proxy_ptr->batch_move_node_with_no_children_and_create_del(
+    path_from_arr,  path_to_arr,    data_arr,
+    path_to_cr_arr, data_to_cr_arr, path_to_del
+  );
+}
+
+bool YappServiceHandler::schedule_rfile_tasks_in_batch(YappServiceHandler * ym_srv_ptr)
+{
+  bool status = false;
+  YAPP_MSG_CODE rc = YAPP_MSG_INVALID;
+  if (NULL == ym_srv_ptr) { return status; }
+
+  /**
+   * Here rf_task_to_schedule will holds all tasks(1 per each diff job) to check
+   * and keep pumping the processes into NEW(newly created) queue for scheduling
+   */
+  vector<string> rf_task_to_schedule;
+  rc = ym_srv_ptr->rfile_task_queue_proxy.get_task_queue (
+    rf_task_to_schedule, ym_srv_ptr->zkc_proxy_ptr
+  );
+  if (YAPP_MSG_SUCCESS != rc) { return status; }
+
+  int tsk_cnt = rf_task_to_schedule.size();
+  if (tsk_cnt < 1) { return true; }
+
+  /* for every task under a job, check all avaliable processes */
+  for (int i = 0; i < tsk_cnt; i++) {
+    /* initialize queue path for each task to schedule */
+    YappSubtaskQueue rf_running_subtask_queue, rf_subtask_queue, rf_failed_task_queue;
+    setup_rftasks_queue_path(ym_srv_ptr, rf_running_subtask_queue, rf_subtask_queue,
+                             rf_failed_task_queue, rf_task_to_schedule[i]);
+
+    vector<string> rf_subtask_arr, rf_failed_subtsk_arr, rf_running_subtsk_arr;
+    /* figuer out any processes already been finished or failed. */
+    if (true != fetch_queue_and_filter_failed_rftasks(
+      ym_srv_ptr, rf_running_subtsk_arr, rf_subtask_arr, rf_failed_subtsk_arr,
+      rf_running_subtask_queue, rf_subtask_queue, rf_failed_task_queue
+    )) { continue; }
+
+    /**
+     * 2. for each task set, check & schedule appropriate # of subtasks
+     *    subtsk_cnt <=0 means there is nothing in the queue to check, while when
+     *    runtsk_cnt >= subtsk_cnt should never occur anyway(consistency checking)
+     */
+    if ((YAPP_MSG_SUCCESS != rc) || (0 >= rf_subtask_arr.size()) ||
+        (rf_running_subtsk_arr.size() >= rf_subtask_arr.size())) { continue; }
+
+    /* 2.1. try to acquire the ex lock for the task set to schedule **/
+    string lock_hnd_ret;
+    rc = ym_srv_ptr->rfile_task_queue_proxy.try_acquire_ex_lock(
+      lock_hnd_ret, rf_task_to_schedule[i], ym_srv_ptr->zkc_proxy_ptr
+    );
+    if (YAPP_MSG_SUCCESS != rc) { continue; }
+
+    vector<string> terminated_subtsk_arr;
+    vector<int>    rf_running_subtsk_idx_arr, terminated_subtsk_idx_arr;
+    /* 2.2. figure out the finished & running procs, record their positions */
+    find_all_current_index_for_running_and_terminated_processes(
+      rf_subtask_arr, rf_running_subtsk_arr, terminated_subtsk_arr,
+      rf_running_subtsk_idx_arr, terminated_subtsk_idx_arr
+    );
+    vector<string> new_rf_subtsk_arr; vector<int> new_rf_subtsk_idx_arr;
+    list<string>   fin_rf_subtsk_arr, fin_rf_subtsk_full_hnd_arr,
+                   subtsk_list_before_change, subtsk_list_after_change;
+    /* 2.3. 1st schedule jobs directly owned by each process. */
+    check_and_schedule_jobs_directly_owned_by_each_process(
+      rf_subtask_arr, terminated_subtsk_arr, new_rf_subtsk_arr,
+      new_rf_subtsk_idx_arr, terminated_subtsk_idx_arr,
+      fin_rf_subtsk_arr, fin_rf_subtsk_full_hnd_arr,
+      subtsk_list_before_change, subtsk_list_after_change, rf_subtask_queue,
+      ym_srv_ptr->batch_task_schedule_limit
+    );
+    /* 2.4. check to see any free processes can help terminated ones */
+    check_and_schedule_to_help_terminated_processes( 
+      new_rf_subtsk_arr, new_rf_subtsk_idx_arr,
+      subtsk_list_before_change, subtsk_list_after_change,
+      fin_rf_subtsk_arr, fin_rf_subtsk_full_hnd_arr,
+      rf_subtask_arr, rf_subtask_queue,
+      ym_srv_ptr->batch_task_schedule_limit
+    );
+    /* 2.5. check to see any free processes can help running ones */
+    check_and_schedule_to_help_running_processes(
+      new_rf_subtsk_arr, new_rf_subtsk_idx_arr,
+      subtsk_list_before_change, subtsk_list_after_change,
+      fin_rf_subtsk_arr, fin_rf_subtsk_full_hnd_arr,
+      rf_subtask_arr, rf_running_subtsk_idx_arr, rf_subtask_queue,
+      ym_srv_ptr->batch_task_schedule_limit
+    );
+    /* 2.6. update all scheduling info. in one single batch trxn */
+    commit_range_file_task_schedule_plan(
+      ym_srv_ptr, rf_subtask_queue, rf_running_subtask_queue, subtsk_list_before_change,
+      subtsk_list_after_change, fin_rf_subtsk_full_hnd_arr, new_rf_subtsk_arr
+    );
+    /* 2.7. clean up all workers if all segments are done. **/
+    check_and_clear_free_processes(
+      new_rf_subtsk_arr,  rf_failed_subtsk_arr, rf_running_subtsk_arr,
+      rf_subtask_arr, fin_rf_subtsk_full_hnd_arr, rf_subtask_queue, ym_srv_ptr
+    );
+    /* 2.8. release the ex lock for the task set. **/
+    ym_srv_ptr->rfile_task_queue_proxy.release_ex_lock(
+      lock_hnd_ret, ym_srv_ptr->zkc_proxy_ptr
+    );
+    usleep(BATCH_OP_NICE_TIME_IN_MICRO_SEC);
+  } /** for (int i = 0; i < tsk_cnt; i++)  **/
+  return true;
+}
+
+bool YappServiceHandler::schedule_rfile_tasks(YappServiceHandler * ym_srv_ptr)
 {
   bool status = false;
   YAPP_MSG_CODE rc = YAPP_MSG_INVALID;
@@ -1212,6 +1978,8 @@ bool YappServiceHandler::schedule_rfile_tasks(
       ym_srv_ptr->rfile_task_queue_proxy.release_ex_lock(
         lock_hnd_ret, ym_srv_ptr->zkc_proxy_ptr
       );
+
+      usleep(BATCH_OP_NICE_TIME_IN_MICRO_SEC);
     } /** } else if (YAPP_MSG_SUCCESS == rc && 0 < subtsk_cnt && runtsk_cnt < subtsk_cnt) **/
   } /** for (int i = 0; i < tsk_cnt; i++)  **/
 
@@ -2022,6 +2790,12 @@ void YappServiceHandler::print_queue_stat(string & tree_str,
                                     const string & hndl_str) {
   if (true == chk_bflag_atomic(&b_flag_exit)) { return; }
   yapp_master_srv_obj.print_queue_stat(tree_str, hndl_str);
+}
+
+void YappServiceHandler::print_failed_queue_stat(string & tree_str,
+                                           const string & hndl_str) {
+  if (true == chk_bflag_atomic(&b_flag_exit)) { return; }
+  yapp_master_srv_obj.print_failed_queue_stat(tree_str, hndl_str);
 }
 
 void YappServiceHandler::pause_proc_arr_rpc(vector<bool> & ret_arr,

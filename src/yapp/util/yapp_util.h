@@ -46,6 +46,8 @@ const static int YAPP_SERVICE_UTILITY_THREAD_CHECKING_RATE_IN_SECOND = 30;
 const static int YAPP_SERVICE_MASTER_CHECK_POLLING_RATE_IN_SECOND = 30;
 const static int YAPP_SERVICE_CHECK_POINT_POLLING_RATE_IN_SECOND = 30;
 
+const static int YAPP_SERVICE_DEF_SCHEDULE_BATCH_SIZE = 64;
+
 const static mode_t YAPP_WORKER_SERV_HNDL_LOG_PERM =
     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
 
@@ -98,7 +100,7 @@ const static int MAX_ELECTION_NODE_DATA_LEN = 256;
 const static int MAX_ELECTION_NODE_INTERFACES_CNT = 16;
 const static int MAX_BATCH_CHUNK = 1024;
 const static int MAX_BATCH_CREATE_CHUNK = 64;
-const static unsigned int BATCH_CREATE_NICE_TIME_IN_MICRO_SEC = 60000;
+const static unsigned int BATCH_OP_NICE_TIME_IN_MICRO_SEC = 120000;
 
 const static char * const PROC_STATUS_CODE_ENTRY[] = {
   "PROC_STATUS_NEW",
@@ -384,6 +386,7 @@ public:
    * NOTE!!!
    * - ALL NODE TO BE DELETED SHOULD NOT CONTAIN ANY CHILD, FOR RECURSIVE DELETE
    *   API FOR SINGLE NODE, PLEASE LOOK FOR delete_node_recur
+   * - THIS WILL DEL ALL THINGS IN ONE BATCH TRXN.
    */
   YAPP_MSG_CODE batch_delete(const vector<string> & path_arr);
 
@@ -483,7 +486,8 @@ public:
    * - ret_code: YAPP_MSG_SUCCESS if everything is ok.
    */
   YAPP_MSG_CODE print_queue_stat(string & node_tree_ret,
-                           const string & leaf_filter_to_disp);
+                           const string & leaf_filter_to_disp,
+                           bool is_display_failed_only = false);
 
   /**
    * Desc:
@@ -600,9 +604,16 @@ public:
    * - THIS METHOD ASSUMES THAT THE NODE PATH WILL ALWAYS EXISTED! FOR RECURSIVE
    *   CREATE API, PLEASE LOOK FOR create_node_recur
    * - IT ONLY SUPPORTS NODE SETTING WITHOUT VERSION CHECKING!
+   * - SUPPOSE TO BE ATOMIC & TRANSACTIONAL
    */
   YAPP_MSG_CODE batch_set(const vector<string> & path_arr,
                           const vector<string> & data_arr);
+
+  YAPP_MSG_CODE batch_set_create_and_delete(
+    const vector<string> & upd_path_arr, const vector<string> & upd_data_arr,
+    const vector<string> & path_to_cr_arr, const vector<string> & data_to_cr_arr,
+    const vector<string> & path_to_del
+  );
 
   /**
    * Desc:
@@ -1054,6 +1065,9 @@ const static char * const YAPP_DAEMON_CFG_FILE_OPTION_ENTRY[] = {
   "subtask_scheule_polling_rate_sec=", "zombie_check_polling_rate_sec=",
   "rftask_autosplit_polling_rate_sec=", "utility_thread_checking_rate_sec=",
   "master_check_polling_rate_sec=", "check_point_polling_rate_sec=",
+
+  "batch_task_schedule_limit=",
+
   "fencing_script_path=", "yappd_log_stdout=", "yappd_log_stderr=",
   "yappd_tmp_folder=", "pid_file=", "root_path=", "verbose=",
 };
@@ -1075,13 +1089,15 @@ enum YAPP_DAEMON_CFG_FILE_OPTION_ENTRY_MAPPING {
   YAPP_DAEMON_CFG_FILE_OPTION_MAS_CHECKING_RATE,
   YAPP_DAEMON_CFG_FILE_OPTION_LOG_CHECKING_RATE,
 
+  YAPP_DAEMON_CFG_FILE_OPTION_BATCH_SCHEDULE_LIMIT,
+
   YAPP_DAEMON_CFG_FILE_OPTION_FENCING_SCRIPT_PATH,
   YAPP_DAEMON_CFG_FILE_OPTION_LOG_STDOUT,
   YAPP_DAEMON_CFG_FILE_OPTION_LOG_STDERR,
   YAPP_DAEMON_CFG_FILE_OPTION_TMP_FOLDER,
   YAPP_DAEMON_CFG_FILE_OPTION_PID_FILE,
   YAPP_DAEMON_CFG_FILE_OPTION_ROOT_PATH,
-  
+
   YAPP_DAEMON_CFG_FILE_OPTION_VERBOSE,
   YAPP_DAEMON_CFG_FILE_OPTION_COUNT,
 };
@@ -1122,6 +1138,8 @@ public:
     check_point_polling_rate_sec =
       YAPP_SERVICE_CHECK_POINT_POLLING_RATE_IN_SECOND;
 
+    batch_task_schedule_limit = YAPP_SERVICE_DEF_SCHEDULE_BATCH_SIZE;
+
     b_verbose = true;
     yapp_mode_code = YAPP_MODE_WORKER;
   }
@@ -1161,7 +1179,8 @@ public:
       kv_env_map["zomb chcking rate: "] = StringUtil::convert_int_to_str(zombie_check_polling_rate_sec);
       kv_env_map["thrd chcking rate: "] = StringUtil::convert_int_to_str(utility_thread_checking_rate_sec);
       kv_env_map["node chcking rate: "] = StringUtil::convert_int_to_str(master_check_polling_rate_sec);
-      kv_env_map["logs chcking rate: "] = StringUtil::convert_int_to_str(check_point_polling_rate_sec);
+      kv_env_map["logs chk-pnt rate: "] = StringUtil::convert_int_to_str(check_point_polling_rate_sec);
+      kv_env_map["task schdule limt: "] = StringUtil::convert_int_to_str(batch_task_schedule_limit);
       kv_env_map["fenc scripts path: "] = fencing_script_path;
     }
     return kv_env_map;
@@ -1182,6 +1201,8 @@ public:
 
   int master_check_polling_rate_sec;
   int check_point_polling_rate_sec;
+
+  int batch_task_schedule_limit;
 
   string fencing_script_path;
   string yappd_log_stdout;

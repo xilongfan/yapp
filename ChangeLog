@@ -156,3 +156,32 @@ This version is essentially for bug fixing:
   1. Flush the job lock whenever there is a failure of connection happened
      when scheduling tasks, this is for solving the problem of idle tasks
      (even master is still alive) found when running on AWS spot instances.
+
+Fri Sep 23 23:48:15 UTC 2016
+
+Tagged Version: 0.9.8
+
+This version includes new handy feature together with some critical bug fixes.
+
+- Features Added:
+  1. Adding the option of '--list-failed-jobs' so that user could actually
+     only print the failed tasks instead of whole task tree.
+
+  2. Unify the anchor format in zookeeper for both file input and range input
+     such that every anchor value will always has its own current id(either
+     file id or range id)
+
+- Bug Fixes Patched:
+  1. Fixed critical bug of potential race condition that will happened if the 
+     checkpoint daemon running against the thread to re-set the anchor value
+     when a certain process is done in the exact same time, such that we will
+     have a lost update and the anchor will not be reset to default value. This
+     will affect jobs taking file list as input, while the range input should
+     be fine as they all have current segment id passed back.
+
+  2. Fixed critical bug of broken job schedule when the size of on-going tasks
+     to be pulled from the queue execeeds the zookeeper transaction size limit
+     such that server cannot schedule any more new processes. The fix is to
+     devide one huge single batch schedule commit to configurable, fixed-size,
+     independent(for fail-over purpose) small scheduling units, while still
+     keep the atomicity requirements.

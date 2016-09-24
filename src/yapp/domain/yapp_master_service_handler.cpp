@@ -1822,6 +1822,14 @@ void YappMasterServiceHandler::print_queue_stat(string & tree_str,
   zkc_proxy_ptr->print_queue_stat(tree_str, hndl_str);
 }
 
+void YappMasterServiceHandler::print_failed_queue_stat(string & tree_str,
+                                                 const string & hndl_str) {
+  string tp_hndl_str = hndl_str;
+  StringUtil::trim_string(tp_hndl_str);
+  if (NULL == zkc_proxy_ptr) { return; }
+  zkc_proxy_ptr->print_queue_stat(tree_str, hndl_str, true);
+}
+
 YAPP_MSG_CODE YappMasterServiceHandler::get_worker_hosts(
   vector<YappServerInfo> & yapp_worker_arr)
 {

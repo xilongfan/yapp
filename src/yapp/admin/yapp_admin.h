@@ -36,7 +36,7 @@ const static char * const YAPP_ADMIN_OPTION_ENTRY[] = {
   "--restart-failed", "--restart-full",      "--restart-continue",
   "--pause",          "--resume",            "--purge",
   "--list-jobs",      "--list-job-by-owner", "--list-job-by-host",
-  "--list-host",      "--list-envs",
+  "--list-host",      "--list-envs",         "--list-failed-jobs",
 
   "--init",           "--ls",                "--tree",
   "--get",            "--set",               "--rm",
@@ -62,6 +62,7 @@ enum YAPP_ADMIN_OPTION_ENTRY_MAPPING {
   YAPP_ADMIN_OPT_LIST_JOB_BY_HOST,
   YAPP_ADMIN_OPT_LIST_HOST,
   YAPP_ADMIN_OPT_LIST_ENVS,
+  YAPP_ADMIN_OPT_LIST_FAILED_JOBS,
 
   YAPP_ADMIN_OPT_INIT,
   YAPP_ADMIN_OPT_LS,
@@ -122,6 +123,9 @@ protected:
 
   void print_queue_info(YappServiceClient & client, vector<string> & ret_arr,
                                               const vector<string> & hndl_arr);
+
+  void print_failed_info(YappServiceClient & client, vector<string> & ret_arr,
+                                               const vector<string> & hndl_arr);
 
   void print_tasks_info(YappServiceClient & client, vector<string> & ret_arr,
                                               const vector<string> & hndl_arr);

@@ -25,6 +25,8 @@ using std::ostringstream;
 using std::map;
 using std::pair;
 
+using namespace yapp::util;
+
 class YappMasterServiceHandler : public YappMasterServiceIf {
   friend class YappServiceHandler;
 public:
@@ -78,6 +80,7 @@ public:
   void print_proc_tree_rpc(string & tree_str, const string & proc_handle);
 
   void print_queue_stat(string & tree_str, const string & hndl_str);
+  void print_failed_queue_stat(string & tree_str, const string & hndl_str);
 
   void pause_proc_arr_rpc(vector<bool> & ret_arr,
                     const vector<string> & proc_hndl_arr);

@@ -43,7 +43,7 @@ void YappAdmin::usage() {
             << std::endl
             << "        --list-host | --list-job-by-host  (${host})*"
             << std::endl
-            << "        --list-envs"
+            << "        --list-envs | --list-failed-jobs (${job_hndl})"
             << std::endl
             << "Note: [] --> optional, | --> OR, * --> any number of"
             << std::endl;
@@ -118,6 +118,8 @@ YAPP_MSG_CODE YappAdmin::parse_arguments()
         case YAPP_ADMIN_OPT_LIST_JOB_BY_HOST:
         case YAPP_ADMIN_OPT_LIST_HOST:
         case YAPP_ADMIN_OPT_LIST_ENVS:
+
+        case YAPP_ADMIN_OPT_LIST_FAILED_JOBS:
 
         case YAPP_ADMIN_OPT_INIT:
         case YAPP_ADMIN_OPT_LS:
@@ -331,6 +333,9 @@ YAPP_MSG_CODE YappAdmin::run() {
         case YAPP_ADMIN_OPT_LIST_ENVS:
           print_yappd_envs(client);                                 break; 
 
+        case YAPP_ADMIN_OPT_LIST_FAILED_JOBS:
+          print_failed_info(client, ret_str_arr, task_hndl_arr);    break;
+
         default: break;
         }
         transport->close();
@@ -540,6 +545,32 @@ void YappAdmin::print_init_yapp_service_env_result(
   std::cout << "Following Folders Have Been Created:" << std::endl;
   for (size_t i = 0; i < ret_arr.size(); i++) {
     std::cout << "-- " << ret_arr[i] << std::endl;
+  }
+}
+
+void YappAdmin::print_failed_info(YappServiceClient & client,
+                                  vector<string> & tree_str_arr,
+                            const vector<string> & hndl_str_arr) {
+  int hndl_str_type = TaskHandleUtil::TASK_HANDLE_TYPE_INVALID;
+  if (hndl_str_arr.empty()) {
+    string ret_tree_str;
+    client.print_failed_queue_stat(ret_tree_str, string(""));
+    tree_str_arr.push_back(ret_tree_str);
+  }
+  for (size_t i = 0; i < hndl_str_arr.size(); i++) {
+    string ret_tree_str;
+    hndl_str_type = TaskHandleUtil::get_task_handle_type(hndl_str_arr[i]);
+    switch(hndl_str_type) {
+    case TaskHandleUtil::TASK_HANDLE_TYPE_JOBS:
+    case TaskHandleUtil::TASK_HANDLE_TYPE_TASK:
+    case TaskHandleUtil::TASK_HANDLE_TYPE_PROC:
+      client.print_failed_queue_stat(ret_tree_str, hndl_str_arr[i]); break;
+    default:                                                         break;
+    }
+    tree_str_arr.push_back(ret_tree_str);
+  }
+  for (size_t i = 0; i < tree_str_arr.size(); i++) { 
+    std::cout << tree_str_arr[i] << std::endl;
   }
 }
 

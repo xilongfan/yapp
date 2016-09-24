@@ -223,6 +223,7 @@ service YappMasterService {
   string print_proc_tree_rpc(1:string proc_handle),
 
   string print_queue_stat(1:string hndl_str);
+  string print_failed_queue_stat(1:string hndl_str);
 
   list<bool> pause_proc_arr_rpc(1:list<string> proc_hndl_arr),
   list<bool> resume_proc_arr_rpc(1:list<string> proc_hndl_arr),
@@ -266,6 +267,7 @@ service YappService {
   string print_proc_tree_rpc(1:string proc_handle),
 
   string print_queue_stat(1:string hndl_str);
+  string print_failed_queue_stat(1:string hndl_str);
  
   list<bool> pause_proc_arr_rpc(1:list<string> proc_hndl_arr),
   list<bool> resume_proc_arr_rpc(1:list<string> proc_hndl_arr),
