@@ -225,6 +225,8 @@ private:
   /** thread dedicated for handling events(signals), notified by a cond. var*/
   static void * thread_event_handler(void * ym_srv_ptr);
 
+  static bool is_subtask_finished_all_its_own_chunk(const string & task_hndl);
+
   void stop_all_master_threads();
   int  start_all_master_threads();
 

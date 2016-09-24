@@ -737,6 +737,18 @@ void YappServiceHandler::find_all_current_index_for_running_and_terminated_proce
   }
 }
 
+bool YappServiceHandler::is_subtask_finished_all_its_own_chunk(const string & task_hndl) {
+  string tskhd_in_job, max_line_idx, tskhd_in_run,
+         cur_line_idx, nxt_line_idx, tot_proc_cnt;
+  RangeFileTaskDataParser::parse_rfile_task_data_str(
+    task_hndl, tskhd_in_job, max_line_idx, tskhd_in_run,
+    cur_line_idx, nxt_line_idx, tot_proc_cnt
+  );
+  long long max_line_idn = atoll(max_line_idx.c_str());
+  long long nxt_line_idn = atoll(nxt_line_idx.c_str());
+  return ((tskhd_in_job != tskhd_in_run) || (nxt_line_idn > max_line_idn));
+}
+
 bool YappServiceHandler::check_schedule_batch_limit(
   vector<string> & new_rf_subtsk_arr, int batch_limit)
 {
@@ -853,7 +865,7 @@ bool YappServiceHandler::check_and_schedule_to_help_terminated_processes(
   bool is_within_schedule_limit = check_schedule_batch_limit(new_rf_subtsk_arr, batch_limit);
   for (int z = 0; ((z < newtsk_cnt) && (!fin_rf_subtsk_arr.empty()) &&
                    (true == is_within_schedule_limit));)
-  { 
+  {
     fin_rf_arr_size = fin_rf_subtsk_arr.size();
     string active_tskhd_in_job, active_max_line_idx, active_tskhd_in_run,
            active_cur_line_idx, active_nxt_line_idx, active_tot_proc_cnt;
@@ -894,6 +906,7 @@ bool YappServiceHandler::check_and_schedule_to_help_terminated_processes(
          fin_rf_subtsk_full_hnd_arr.pop_front())
     {
       fin_subtsk_in_job = fin_rf_subtsk_arr.front();
+      if (false == is_subtask_finished_all_its_own_chunk(fin_subtsk_in_job)) { continue; }
       string fin_tskhd_in_job, fin_max_line_idx, fin_tskhd_in_run,
              fin_cur_line_idx, fin_nxt_line_idx, fin_tot_proc_cnt;
       ret = RangeFileTaskDataParser::parse_rfile_task_data_str (
@@ -1017,6 +1030,7 @@ bool YappServiceHandler::check_and_schedule_to_help_running_processes(
                 << std::endl;
 #endif
       fin_subtsk_in_job = fin_rf_subtsk_arr.front();
+      if (false == is_subtask_finished_all_its_own_chunk(fin_subtsk_in_job)) { continue; }
       string fin_tskhd_in_job, fin_max_line_idx, fin_tskhd_in_run,
              fin_cur_line_idx, fin_nxt_line_idx, fin_tot_proc_cnt;
       ret = RangeFileTaskDataParser::parse_rfile_task_data_str (

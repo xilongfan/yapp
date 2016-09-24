@@ -328,7 +328,6 @@ void * YappWorkerServiceHandler::thread_start_sub_task_async(void * data_ptr)
             }
           }
           break;
-
         }
         case ((int)TASK_INPUT_TYPE::RANGE_FILE): {
           /** ${app} ${src} [ $input_file $lineid $log_anchor_pos arg0, arg1, ..., argn ] **/
@@ -336,12 +335,26 @@ void * YappWorkerServiceHandler::thread_start_sub_task_async(void * data_ptr)
                  cur_line_idx, nxt_line_idx, tot_proc_cnt;
           RangeFileTaskDataParser::parse_rfile_task_data_str(
             task_ptr->proc_arr.front().proc_hnd,
-              tskhd_in_job, max_line_idx, tskhd_in_run,
-              cur_line_idx, nxt_line_idx, tot_proc_cnt
+            tskhd_in_job, max_line_idx, tskhd_in_run,
+            cur_line_idx, nxt_line_idx, tot_proc_cnt
           );
           arg_set.push_back(task_ptr->input_file);
           arg_set.push_back(cur_line_idx);
-  
+
+          std::size_t anchor_delim_pos = anchor_str.find(DEF_LINE_AND_OFFSET_DELIM);
+          if (string::npos != anchor_delim_pos) {
+            string cur_line_to_proc = StringUtil::convert_int_to_str(
+              atoll(anchor_str.substr(0, anchor_delim_pos).c_str())
+            );
+            string cur_ahor_to_proc = anchor_str.substr(anchor_delim_pos + 1);
+            StringUtil::trim_string(cur_line_to_proc);
+            StringUtil::trim_string(cur_ahor_to_proc);
+            if (cur_line_to_proc == cur_line_idx) {
+              anchor_str = cur_ahor_to_proc;
+            } else {
+              anchor_str = g_yapp_service_constants.PROC_CTRL_BLCK_DEFAULT_ANCHOR_POS;
+            }
+          }
           /**
            * every time a subtask gets restarted, with startting flag marked as
            * PROC_CTRL_BLCK_ANCHR_START(which is by def., including zombie jobs
@@ -491,10 +504,10 @@ void * YappWorkerServiceHandler::thread_start_sub_task_async(void * data_ptr)
 
     if (0 == pthread_rwlock_rdlock(&yappw_inst_rwlock)) {
       if (0 < yw_serv_ptr->get_pid_sz_registry_atomic()) {
+        yw_serv_ptr->del_pid_in_registry_atomic(child_pid);
         yw_serv_ptr->mark_process_as_terminated(
           task_ptr->proc_arr.front().proc_hnd, task_ret, task_sig
         );
-        yw_serv_ptr->del_pid_in_registry_atomic(child_pid);
       }
       pthread_rwlock_unlock(&yappw_inst_rwlock);
     }
@@ -673,9 +686,9 @@ YAPP_MSG_CODE YappWorkerServiceHandler::mark_process_as_ready(
   data_arr.push_back(
     StringUtil::convert_int_to_str(PROC_STATUS_CODE::PROC_STATUS_READY)
   );
-/*
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
+/*
   path_arr.push_back(proc_path + "/last_updated_tmstp_sec"); 
   data_arr.push_back(StringUtil::convert_int_to_str(ts.tv_sec));
 */
@@ -738,12 +751,12 @@ YAPP_MSG_CODE YappWorkerServiceHandler::mark_process_as_running(
   /** reset the startting flag so that latest log anchor will gets pulled. **/
   path_arr.push_back(proc_path + "/start_flag");
   data_arr.push_back(StringUtil::convert_int_to_str(
-    g_yapp_service_constants.PROC_CTRL_BLCK_ANCHR_START)    
-  );   
+    g_yapp_service_constants.PROC_CTRL_BLCK_ANCHR_START)
+  );
 
-/*
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
+/*
   path_arr.push_back(proc_path + "/last_updated_tmstp_sec"); 
   data_arr.push_back(StringUtil::convert_int_to_str(ts.tv_sec));
 */
@@ -801,9 +814,9 @@ YAPP_MSG_CODE YappWorkerServiceHandler::mark_process_as_blocked(
   data_arr.push_back(
     StringUtil::convert_int_to_str(PROC_STATUS_CODE::PROC_STATUS_BLOCKED)
   );
-/*
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
+/*
   path_arr.push_back(proc_path + "/last_updated_tmstp_sec"); 
   data_arr.push_back(StringUtil::convert_int_to_str(ts.tv_sec));
 */
@@ -861,9 +874,9 @@ YAPP_MSG_CODE YappWorkerServiceHandler::mark_process_as_resumed(
   data_arr.push_back(
     StringUtil::convert_int_to_str(PROC_STATUS_CODE::PROC_STATUS_RUNNING)
   );
-/*
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
+/*
   path_arr.push_back(proc_path + "/last_updated_tmstp_sec"); 
   data_arr.push_back(StringUtil::convert_int_to_str(ts.tv_sec));
 */
@@ -950,7 +963,7 @@ YAPP_MSG_CODE YappWorkerServiceHandler::mark_process_as_terminated(
   vector<string> data_arr;
   path_arr.push_back(proc_path + "/host_str");
   data_arr.push_back(zkc_proxy_ptr->get_host_str_in_pcb());
-  path_arr.push_back(proc_path + "/cur_status"); 
+  path_arr.push_back(proc_path + "/cur_status");
   data_arr.push_back(
     StringUtil::convert_int_to_str(PROC_STATUS_CODE::PROC_STATUS_TERMINATED)
   );
@@ -988,9 +1001,9 @@ YAPP_MSG_CODE YappWorkerServiceHandler::mark_process_as_terminated(
     );
   }
 
-/*
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
+/*
   path_arr.push_back(proc_path + "/last_updated_tmstp_sec"); 
   data_arr.push_back(StringUtil::convert_int_to_str(ts.tv_sec));
 */

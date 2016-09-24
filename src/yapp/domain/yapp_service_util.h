@@ -136,6 +136,8 @@ public:
         new_anchor = (new_line + DEF_LINE_AND_OFFSET_DELIM + new_anchor);
         new_line = StringUtil::convert_int_to_str(new_line_idx);
       }
+    } else if (atoi(job_type.c_str()) == (int)TASK_INPUT_TYPE::RANGE_FILE) {
+      new_anchor = (new_line + DEF_LINE_AND_OFFSET_DELIM + new_anchor);
     }
     StringUtil::trim_string(new_anchor);
     vector<string> path_arr, data_arr;

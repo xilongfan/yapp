@@ -857,6 +857,7 @@ YAPP_MSG_CODE ZkClusterProxy::print_queue_stat(string & node_tree_ret,
       node_tree_ret.append("\n");
 
       string tmp_path = range_file_tsk_queue_path + "/" +  tsk_hndl_arr[i];
+      if (true == is_display_failed_only) { tmp_path.append("/failed_procs"); }
       rc = get_node_arr(tmp_path, child_nodes_arr);
       int chld_cnt = child_nodes_arr.size();
       for (int c = 0; c < chld_cnt; c++) {
@@ -942,6 +943,8 @@ YAPP_MSG_CODE ZkClusterProxy::print_queue_stat(string & node_tree_ret,
     cur_queue_arr.push_back(runn_tsk_queue_path);
     cur_queue_arr.push_back(paused_queue_path);
     cur_queue_arr.push_back(term_queue_path);
+  } else {
+    node_tree_ret.clear();
   }
 
   int tot_tcnt_arr[] = { 0, 0, 0, 0, 0, 0, };
@@ -1007,49 +1010,49 @@ YAPP_MSG_CODE ZkClusterProxy::print_queue_stat(string & node_tree_ret,
     node_tree_ret.append("    Task To Query in Queue: ");
     node_tree_ret.append(leaf_filter_to_disp);
     node_tree_ret.append("\n");
-    node_tree_ret.append("    Subtask Found: ");
+    node_tree_ret.append("    Queuing Tasks: ");
     node_tree_ret.append(StringUtil::convert_int_to_str(tcnt_tsk));
     node_tree_ret.append("\n");
-    node_tree_ret.append("    Newly Created: ");
+    node_tree_ret.append("    Pending Tasks: ");
     node_tree_ret.append(StringUtil::convert_int_to_str(tcnt_arr[newtsk_idx]));
     node_tree_ret.append("\n");
     node_tree_ret.append("    Ready to Fire: ");
     node_tree_ret.append(StringUtil::convert_int_to_str(tcnt_arr[readyt_idx]));
     node_tree_ret.append("\n");
-    node_tree_ret.append("    Curr. Running: ");
+    node_tree_ret.append("    Running Tasks: ");
     node_tree_ret.append(StringUtil::convert_int_to_str(tcnt_arr[runtsk_idx]));
     node_tree_ret.append("\n");
-    node_tree_ret.append("    Succ. Finished: ");
+    node_tree_ret.append("    Task Finished: ");
     node_tree_ret.append(StringUtil::convert_int_to_str(tcnt_arr[termts_idx]));
     node_tree_ret.append("\n");
-    node_tree_ret.append("    Being Paused..: ");
+    node_tree_ret.append("    Paused Subtsk: ");
     node_tree_ret.append(StringUtil::convert_int_to_str(tcnt_arr[paused_idx]));
     node_tree_ret.append("\n");
-    node_tree_ret.append("    Already Failed: ");
+    node_tree_ret.append("    Failed Subtsk: ");
     node_tree_ret.append(StringUtil::convert_int_to_str(tcnt_arr[failed_idx]));
     node_tree_ret.append("\n");
   }
 
   node_tree_ret.append("Overall Summary for the Entire Queue:\n");
-  node_tree_ret.append("    Total Subtask: ");
+  node_tree_ret.append("    Queuing Tasks: ");
   node_tree_ret.append(StringUtil::convert_int_to_str(tot_tcnt_tsk));
   node_tree_ret.append("\n");
-  node_tree_ret.append("    Newly Created: ");
+  node_tree_ret.append("    Pending Tasks: ");
   node_tree_ret.append(StringUtil::convert_int_to_str(tot_tcnt_arr[newtsk_idx]));
   node_tree_ret.append("\n");
   node_tree_ret.append("    Ready to Fire: ");
   node_tree_ret.append(StringUtil::convert_int_to_str(tot_tcnt_arr[readyt_idx]));
   node_tree_ret.append("\n");
-  node_tree_ret.append("    Curr. Running: ");
+  node_tree_ret.append("    Running Tasks: ");
   node_tree_ret.append(StringUtil::convert_int_to_str(tot_tcnt_arr[runtsk_idx]));
   node_tree_ret.append("\n");
-  node_tree_ret.append("    Succ. Finished: ");
+  node_tree_ret.append("    Task Finished: ");
   node_tree_ret.append(StringUtil::convert_int_to_str(tot_tcnt_arr[termts_idx]));
   node_tree_ret.append("\n");
-  node_tree_ret.append("    Being Paused..: ");
+  node_tree_ret.append("    Paused Subtsk: ");
   node_tree_ret.append(StringUtil::convert_int_to_str(tot_tcnt_arr[paused_idx]));
   node_tree_ret.append("\n");
-  node_tree_ret.append("    Already Failed: ");
+  node_tree_ret.append("    Failed Subtsk: ");
   node_tree_ret.append(StringUtil::convert_int_to_str(tot_tcnt_arr[failed_idx]));
   node_tree_ret.append("\n");
   node_tree_ret.append("NOTE:\n");
