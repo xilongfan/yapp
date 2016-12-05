@@ -2221,7 +2221,6 @@ bool ConfigureUtil::load_zk_cluster_cfg(const string & file_str) {
   zk_srv_host_arr.clear();
 
   string buffer = "";
-  buffer.reserve(256);
 
   /**
    * The contents of the configuration file may like the following:

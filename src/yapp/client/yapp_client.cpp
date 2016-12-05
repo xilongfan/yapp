@@ -39,7 +39,6 @@ YAPP_MSG_CODE YappClient::parse_arguments()
     fin.open(arg_arr.front().c_str(), ios::in);
     if (true == fin.is_open()) {
       string buffer = "";
-      buffer.reserve(256);
       while (std::getline(fin, buffer)) {
         StringUtil::trim_string(buffer);
         if (buffer.empty()) { continue; }
@@ -139,7 +138,6 @@ YAPP_MSG_CODE YappClient::parse_arguments()
             fin.open(range_file.c_str(), ios::in);
             if (true == fin.is_open()) {
               string buffer = "";
-              buffer.reserve(256);
               while (std::getline(fin, buffer)) { line_cnt++; }
               fin.close();
               range_from = 0;

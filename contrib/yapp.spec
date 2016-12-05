@@ -2,7 +2,7 @@ Name:          yapp
 Group:         Development
 Summary:       YAPP(Yet Another Parallel Processing), A Data Processing Automation Framework
 License:       The MIT License (MIT)
-Version:       0.9.8
+Version:       0.9.9
 Release:       0
 URL:           https://github.com/Spokeo/yapp
 Packager:      Xilong Fan, <xfan@spokeo.com>
@@ -66,5 +66,6 @@ mkdir -p ${RPM_BUILD_ROOT}%{_localstatedir}/tmp/yappd
 mv ${RPM_BUILD_ROOT}%{_sysconfdir}/yappd ${RPM_BUILD_ROOT}%{_initrddir}/yappd
 
 %changelog
-* Fri Jun 10 2016 Xilong Fan <xfan@spokeo.com> 0.9.8
-- Bug fix version for previous 0.9.7
+* Mon Dec 05 2016 Xilong Fan <xfan@spokeo.com> 0.9.9
+- Bug fix version for previous 0.9.8
+

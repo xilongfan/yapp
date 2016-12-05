@@ -68,7 +68,7 @@ const static string PROC_HNDL_DELM = "_proc-";
 const static string PROC_HOST_STR_DELM = ":";
 
 const static int MAX_SEQ_SIZE = 32;
-const static int MAX_PATH_LEN = 256;
+const static int MAX_PATH_LEN = 2048;
 
 const static char * const CONFIG_KEY_VALUE_DELIM = "=";
 const static char CONFIG_COMMENTS_PREFIX = '#';
@@ -96,7 +96,7 @@ const static int MAX_COND_WAIT_TIME_OUT = 40;
 const static int CALLBACK_RET_INVALID_VAL = INT_MIN;
 
 const static int MAX_ELECTION_NODE_WAIT_SECS = 1;
-const static int MAX_ELECTION_NODE_DATA_LEN = 256;
+const static int MAX_ELECTION_NODE_DATA_LEN = 2048;
 const static int MAX_ELECTION_NODE_INTERFACES_CNT = 16;
 const static int MAX_BATCH_CHUNK = 1024;
 const static int MAX_BATCH_CREATE_CHUNK = 64;

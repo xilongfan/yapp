@@ -185,3 +185,12 @@ This version includes new handy feature together with some critical bug fixes.
      devide one huge single batch schedule commit to configurable, fixed-size,
      independent(for fail-over purpose) small scheduling units, while still
      keep the atomicity requirements.
+
+Mon Dec 05 22:35:33 UTC 2016
+
+Tagged Version: 0.9.9
+
+This version includes some critical bug fixes.
+
+- Bug Fixes Patched:
+  1. Increase buffer size limit for customized envs and job meta data.
