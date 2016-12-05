@@ -1,7 +1,7 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ([2.61])
-AC_INIT([yapp], [0.9.8], [xfan@spokeo.com])
+AC_INIT([yapp], [0.9.9], [xfan@spokeo.com])
 AM_INIT_AUTOMAKE
 
 #AC_DEFINE([DEBUG_YAPP_JOB_SUBMISSION], [], [this macro will be used for trunning on the DEBUG for testing job submission])

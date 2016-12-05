@@ -9,8 +9,8 @@
 #include <thrift/transport/TTransportUtils.h>
 
 #include "gen-cpp/YappService.h"
-#include "gen-cpp/yapp_service_types.h"                                                                   
-#include "gen-cpp/yapp_service_constants.h"                                                               
+#include "gen-cpp/yapp_service_types.h"
+#include "gen-cpp/yapp_service_constants.h"
 
 using namespace yapp::domain;
 
